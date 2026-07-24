@@ -30,7 +30,7 @@ class RpcApplication:
             query = self._string_param(request, "query")
             limit = self._int_param(request, "limit", default=20, minimum=1, maximum=100)
             results, degraded = self._search(
-                query, limit, bool(request.params.get("no_rerank", False))
+                query, limit, self._bool_param(request, "no_rerank", default=False)
             )
             payload = {
                 "results": [self._search_result(result) for result in results],
@@ -41,7 +41,7 @@ class RpcApplication:
         if request.method == "ask":
             return self._ask(
                 self._string_param(request, "question"),
-                bool(request.params.get("no_rerank", False)),
+                self._bool_param(request, "no_rerank", default=False),
                 cancelled,
                 emit,
             )
@@ -207,4 +207,10 @@ class RpcApplication:
         value = request.params.get(name, default)
         if not isinstance(value, int) or isinstance(value, bool) or not minimum <= value <= maximum:
             raise ValueError(f"parameter {name} must be between {minimum} and {maximum}")
+        return value
+
+    def _bool_param(self, request: RpcRequest, name: str, *, default: bool) -> bool:
+        value = request.params.get(name, default)
+        if not isinstance(value, bool):
+            raise ValueError(f"parameter {name} must be a boolean")
         return value
