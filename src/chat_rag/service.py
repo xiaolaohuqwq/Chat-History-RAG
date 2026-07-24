@@ -56,6 +56,8 @@ _BROAD_MARKERS = (
     "change over time",
 )
 
+_LATEST_MARKERS = ("最新", "当前", "现在", "目前", "latest", "current", "recent")
+
 
 class ChatRAGService:
     def __init__(
@@ -97,7 +99,11 @@ class ChatRAGService:
             queries = parse_retrieval_plan(plan_raw)
             for query in queries:
                 all_results.extend(self.retriever.search(query))
-        selected = self._select_diverse(all_results, self.final_evidence_blocks)
+        selected = self._select_diverse(
+            all_results,
+            self.final_evidence_blocks,
+            prefer_recent=any(marker in question.lower() for marker in _LATEST_MARKERS),
+        )
         blocks = build_evidence_blocks(self.store, selected)
         full = pack_evidence(blocks, max_tokens=max(self.max_input_tokens * 10, 1_000_000))
 
@@ -140,7 +146,9 @@ class ChatRAGService:
             raise ValueError("LLM request would exceed LLM_MAX_INPUT_TOKENS")
         return self.llm.complete(system, user)
 
-    def _select_diverse(self, results: list[SearchResult], limit: int) -> list[SearchResult]:
+    def _select_diverse(
+        self, results: list[SearchResult], limit: int, *, prefer_recent: bool = False
+    ) -> list[SearchResult]:
         unique: dict[str, SearchResult] = {}
         for result in results:
             existing = unique.get(result.window.window_id)
@@ -150,6 +158,15 @@ class ChatRAGService:
         selected: list[SearchResult] = []
         seen_senders: set[str] = set()
         seen_days: set[str] = set()
+        newest_time = max(
+            (
+                message.time_utc
+                for result in remaining
+                for message in result.messages
+                if message.time_utc is not None
+            ),
+            default=None,
+        )
         while remaining and len(selected) < limit:
 
             def diversity_score(result: SearchResult) -> tuple[float, str]:
@@ -168,6 +185,16 @@ class ChatRAGService:
                     default=0.0,
                 )
                 bonus = 0.01 * bool(senders - seen_senders) + 0.01 * bool(days - seen_days)
+                if prefer_recent and newest_time is not None:
+                    candidate_time = max(
+                        (
+                            message.time_utc
+                            for message in result.messages
+                            if message.time_utc is not None
+                        ),
+                        default=None,
+                    )
+                    bonus += 0.05 * bool(candidate_time == newest_time)
                 return result.score - 0.2 * overlap + bonus, result.window.window_id
 
             best = max(remaining, key=diversity_score)

@@ -134,3 +134,19 @@ def test_invalid_citation_gets_one_bounded_repair_call(tmp_path: Path) -> None:
     assert result.answer == "修复引用 [m1]"
     assert llm.calls[-1][0] == CITATION_REPAIR_SYSTEM_PROMPT
     assert result.citation_warning is None
+
+
+def test_latest_question_applies_recency_bonus_only_when_requested(tmp_path: Path) -> None:
+    llm = ScriptedLLM(["最新结论 [m2]"])
+    with SQLiteStore(tmp_path / "app.db") as store:
+        results = make_results(store, 2)
+        results = [results[0], SearchResult(results[1].window, results[1].messages, 0.99)]
+        ChatRAGService(
+            store,
+            FakeRetriever(results),
+            llm,
+            final_evidence_blocks=1,
+        ).ask("最新状态是什么？")
+
+    assert "m2" in llm.calls[0][1]
+    assert "m1" not in llm.calls[0][1]
