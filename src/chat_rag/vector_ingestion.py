@@ -154,8 +154,9 @@ def ingest_vectors(
         while completed := embed_pending_batch():
             embedded += completed
             checkpoint()
-    except Exception as error:
-        checkpoint("failed", error_summary=type(error).__name__, completed_at=datetime.now(UTC))
+    except BaseException as error:
+        status = "interrupted" if isinstance(error, (KeyboardInterrupt, SystemExit)) else "failed"
+        checkpoint(status, error_summary=type(error).__name__, completed_at=datetime.now(UTC))
         raise
 
     store.set_index_identity(*requested_identity)

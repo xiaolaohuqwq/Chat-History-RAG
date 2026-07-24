@@ -229,6 +229,31 @@ def test_failed_ingestion_run_is_recorded_without_provider_error_body(tmp_path: 
     assert run["error_summary"] == "RuntimeError"
 
 
+def test_keyboard_interrupt_marks_run_interrupted(tmp_path: Path) -> None:
+    source = source_file(tmp_path / "messages.jsonl", count=2)
+
+    class InterruptedEmbedder(FakeEmbedder):
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            raise KeyboardInterrupt
+
+    with SQLiteStore(tmp_path / "app.db") as store:
+        with pytest.raises(KeyboardInterrupt):
+            ingest_vectors(
+                source,
+                store,
+                FakeVectors(),
+                InterruptedEmbedder(3),
+                model="embedding-v1",
+                dimension=3,
+                target_tokens=50,
+                max_tokens=80,
+            )
+        run = store.latest_ingestion_run()
+    assert run is not None
+    assert run["status"] == "interrupted"
+    assert run["error_summary"] == "KeyboardInterrupt"
+
+
 def test_appending_source_replaces_obsolete_tail_windows(tmp_path: Path) -> None:
     source = source_file(tmp_path / "messages.jsonl", count=3)
     vectors = FakeVectors()
