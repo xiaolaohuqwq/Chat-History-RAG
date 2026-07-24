@@ -6,6 +6,8 @@ from typing import Protocol
 
 import httpx
 
+from chat_rag.token_estimator import estimate_tokens
+
 
 class RerankError(RuntimeError):
     pass
@@ -26,10 +28,12 @@ class DashScopeReranker:
         transport: httpx.BaseTransport | None = None,
         max_attempts: int = 4,
         backoff_seconds: float = 0.5,
+        max_input_tokens: int = 30_000,
     ) -> None:
         self.model = model
         self.max_attempts = max_attempts
         self.backoff_seconds = backoff_seconds
+        self.max_input_tokens = max_input_tokens
         self.client = httpx.Client(
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=60,
@@ -39,11 +43,21 @@ class DashScopeReranker:
     def rerank(self, query: str, candidates: list[tuple[str, str]]) -> list[tuple[str, float]]:
         if not candidates:
             return []
-        response = self._post(query, [text for _, text in candidates])
+        selected: list[tuple[str, str]] = []
+        used_tokens = estimate_tokens(query) + 100
+        for candidate in candidates:
+            candidate_tokens = estimate_tokens(candidate[1])
+            if used_tokens + candidate_tokens > self.max_input_tokens:
+                continue
+            selected.append(candidate)
+            used_tokens += candidate_tokens
+        if not selected:
+            raise RerankError("no complete reranking candidate fits the provider context limit")
+        response = self._post(query, [text for _, text in selected])
         try:
             results = response.json()["output"]["results"]
             ranked = [
-                (candidates[int(item["index"])][0], float(item["relevance_score"]))
+                (selected[int(item["index"])][0], float(item["relevance_score"]))
                 for item in results
             ]
         except (IndexError, KeyError, TypeError, ValueError) as error:
