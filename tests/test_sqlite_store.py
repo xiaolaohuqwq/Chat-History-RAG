@@ -29,3 +29,11 @@ def test_schema_persists_messages_and_windows_idempotently(tmp_path: Path) -> No
         assert store.count("windows") == 1
         assert store.get_message("m_1") == message
         assert store.get_window(window.window_id) is not None
+
+
+def test_store_enables_wal_for_concurrent_tui_reads(tmp_path: Path) -> None:
+    with SQLiteStore(tmp_path / "app.db") as store:
+        mode = store.connection.execute("PRAGMA journal_mode").fetchone()[0]
+        timeout = store.connection.execute("PRAGMA busy_timeout").fetchone()[0]
+    assert mode == "wal"
+    assert timeout >= 5_000
