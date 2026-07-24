@@ -8,6 +8,7 @@ import typer
 from chat_rag.config import Settings
 from chat_rag.embedding_client import DashScopeEmbeddingClient
 from chat_rag.ingest import analyze_jsonl
+from chat_rag.rerank_client import DashScopeReranker
 from chat_rag.retrieval import HybridRetriever
 from chat_rag.sqlite_store import SQLiteStore
 from chat_rag.vector_ingestion import ingest_vectors
@@ -84,7 +85,6 @@ def search(
     no_rerank: Annotated[bool, typer.Option("--no-rerank")] = False,
 ) -> None:
     """Run hybrid retrieval and print traceable source messages."""
-    del no_rerank
     settings = Settings()
     try:
         api_key = settings.require_embedding()
@@ -96,6 +96,7 @@ def search(
                 DashScopeEmbeddingClient(
                     api_key, settings.embedding_model, settings.embedding_dimension
                 ),
+                reranker=None if no_rerank else DashScopeReranker(api_key, settings.rerank_model),
             )
             results = retriever.search(
                 query,
@@ -103,8 +104,11 @@ def search(
                 lexical_limit=settings.lexical_top_k_per_query,
                 limit=limit,
             )
+            degraded_reason = retriever.degraded_reason
     except (ValueError, RuntimeError) as error:
         raise typer.ClickException(str(error)) from None
+    if degraded_reason:
+        typer.echo(f"warning: {degraded_reason}; using fused retrieval scores", err=True)
     for result in results:
         typer.echo(f"{result.window.window_id} score={result.score:.6f}")
         for message in result.messages:

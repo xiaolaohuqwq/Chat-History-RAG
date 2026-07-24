@@ -37,6 +37,11 @@ class QueryVectors:
         pass
 
 
+class FailingReranker:
+    def rerank(self, query: str, candidates: list[tuple[str, str]]) -> list[tuple[str, float]]:
+        raise RuntimeError("provider down")
+
+
 def stored_windows(store: SQLiteStore) -> list[str]:
     messages = [
         Message(
@@ -109,3 +114,16 @@ def test_hybrid_results_resolve_original_message_metadata(tmp_path: Path) -> Non
         assert results[0].messages[0].message_id == "m1"
         assert results[0].messages[0].name == "甲"
         assert any(result.window.window_id == ids[2] for result in results)
+
+
+def test_reranker_failure_falls_back_to_fused_results(tmp_path: Path) -> None:
+    with SQLiteStore(tmp_path / "app.db") as store:
+        ids = stored_windows(store)
+        retriever = HybridRetriever(
+            store, QueryVectors([ids[2], ids[0]]), QueryEmbedder(), reranker=FailingReranker()
+        )
+
+        results = retriever.search("ABC-123")
+
+        assert results
+        assert retriever.degraded_reason == "reranking unavailable"

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from chat_rag.domain import Message, Window
 from chat_rag.embedding_client import EmbeddingProvider
+from chat_rag.rerank_client import Reranker
 from chat_rag.sqlite_store import SQLiteStore
 from chat_rag.vector_store import VectorStore
 
@@ -42,10 +43,13 @@ class HybridRetriever:
         store: SQLiteStore,
         vectors: VectorStore,
         embedder: EmbeddingProvider,
+        reranker: Reranker | None = None,
     ) -> None:
         self.store = store
         self.vectors = vectors
         self.embedder = embedder
+        self.reranker = reranker
+        self.degraded_reason: str | None = None
 
     def search(
         self,
@@ -59,8 +63,27 @@ class HybridRetriever:
         vector_ids = [item.window_id for item in self.vectors.search(vector, vector_limit)]
         lexical_ids = self.store.lexical_search(query, lexical_limit)
         scores = reciprocal_rank_fusion([vector_ids, lexical_ids])
+        ordered_ids = list(scores)
+        self.degraded_reason = None
+        if self.reranker is not None:
+            candidates = [
+                (window_id, window.text)
+                for window_id in ordered_ids
+                if (window := self.store.get_window(window_id)) is not None
+            ]
+            try:
+                reranked = self.reranker.rerank(query, candidates)
+                rerank_scores = dict(reranked)
+                reranked_ids = [window_id for window_id, _score in reranked]
+                ordered_ids = [
+                    *reranked_ids,
+                    *(item for item in ordered_ids if item not in rerank_scores),
+                ]
+                scores.update(rerank_scores)
+            except RuntimeError:
+                self.degraded_reason = "reranking unavailable"
         results: list[SearchResult] = []
-        for window_id, score in list(scores.items())[:limit]:
+        for window_id in ordered_ids[:limit]:
             window = self.store.get_window(window_id)
             if window is None:
                 continue
@@ -68,7 +91,7 @@ class HybridRetriever:
                 SearchResult(
                     window=window,
                     messages=tuple(self.store.get_window_messages(window_id)),
-                    score=score,
+                    score=scores[window_id],
                 )
             )
         return results
