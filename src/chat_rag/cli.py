@@ -255,5 +255,29 @@ def serve(stdio: Annotated[bool, typer.Option("--stdio")] = False) -> None:
     StdioServer(RpcApplication(Settings())).serve(sys.stdin, sys.stdout)
 
 
+@app.command("smoke-embedding")
+def smoke_embedding() -> None:
+    """Embed three synthetic messages to verify cloud model configuration."""
+    settings = Settings()
+    try:
+        client = DashScopeEmbeddingClient(
+            settings.require_embedding(),
+            settings.embedding_model,
+            settings.embedding_dimension,
+        )
+        vectors = client.embed_documents(
+            [
+                "合成消息：项目计划在下周评审。",
+                "Synthetic message: deployment identifier DEMO-123.",
+                "合成消息：测试尚未完成，建议延期。",
+            ]
+        )
+    except (ValueError, RuntimeError) as error:
+        _fail(str(error))
+    typer.echo(f"model: {settings.embedding_model}")
+    typer.echo(f"vectors: {len(vectors)}")
+    typer.echo(f"dimension: {len(vectors[0]) if vectors else 0}")
+
+
 if __name__ == "__main__":
     app()
