@@ -64,6 +64,7 @@ def test_inspect_resolves_message_id(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_ask_reports_missing_configuration_without_traceback(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
