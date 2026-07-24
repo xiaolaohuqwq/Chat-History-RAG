@@ -99,3 +99,35 @@ def test_embedding_splits_logical_batch_at_provider_limit() -> None:
     assert len(vectors) == 45
     assert vectors[0] == [0.0, 0.0]
     assert vectors[-1] == [44.0, 44.0]
+
+
+def test_embedding_bisects_a_rejected_multi_input_batch() -> None:
+    request_sizes: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        inputs = json.loads(request.content)["input"]
+        request_sizes.append(len(inputs))
+        if len(inputs) > 2:
+            return response(400, {"message": "batch input is too large"})
+        return response(
+            200,
+            {
+                "data": [
+                    {"index": index, "embedding": [float(text), float(text)]}
+                    for index, text in enumerate(inputs)
+                ]
+            },
+        )
+
+    client = DashScopeEmbeddingClient(
+        "secret", "model", 2, transport=httpx.MockTransport(handler), max_attempts=1
+    )
+
+    assert client.embed_documents(["0", "1", "2", "3", "4"]) == [
+        [0.0, 0.0],
+        [1.0, 1.0],
+        [2.0, 2.0],
+        [3.0, 3.0],
+        [4.0, 4.0],
+    ]
+    assert request_sizes == [5, 2, 3, 1, 2]

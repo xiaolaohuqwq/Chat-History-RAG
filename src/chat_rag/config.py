@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     window_overlap_messages: int = 2
     session_gap_minutes: int = 20
     embed_batch_size: int = 64
+    embedding_concurrency: int = 4
     vector_top_k_per_query: int = 40
     lexical_top_k_per_query: int = 40
     rerank_candidates: int = 100
@@ -38,6 +39,8 @@ class Settings(BaseSettings):
             raise ValueError("window context budget is inconsistent")
         if not 256 <= self.embedding_dimension <= 2560:
             raise ValueError("embedding dimension must be between 256 and 2560")
+        if not 1 <= self.embedding_concurrency <= 4:
+            raise ValueError("embedding concurrency must be between 1 and 4")
         return self
 
     def require_embedding(self) -> str:

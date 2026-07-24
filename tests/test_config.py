@@ -24,6 +24,12 @@ def test_invalid_context_budget_is_rejected() -> None:
         )
 
 
+@pytest.mark.parametrize("workers", [0, 5])
+def test_embedding_concurrency_is_bounded(workers: int) -> None:
+    with pytest.raises(ValueError, match="concurrency"):
+        Settings(_env_file=None, embedding_concurrency=workers)
+
+
 def test_cloud_validation_never_echoes_secret() -> None:
     secret = "super-secret-key"
     settings = Settings(_env_file=None, api_key=secret, base_url="", model="")

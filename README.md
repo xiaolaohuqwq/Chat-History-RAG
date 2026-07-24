@@ -57,7 +57,9 @@ uv run chat-rag ingest messages.jsonl --rebuild-vectors
 
 The configured logical batch size is 64. The DashScope adapter transparently
 splits it into provider requests of at most 20 inputs, which is the endpoint's
-enforced per-request limit.
+enforced per-request limit. Set `EMBEDDING_CONCURRENCY=1` when an account's TPM
+limit requires serial provider requests; rejected multi-input batches are
+automatically bisected without exposing provider response bodies.
 
 Local generated state is stored under `data/`:
 

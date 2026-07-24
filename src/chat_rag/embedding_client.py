@@ -12,6 +12,10 @@ class EmbeddingError(RuntimeError):
     pass
 
 
+class _EmbeddingBatchRejected(EmbeddingError):
+    pass
+
+
 class EmbeddingProvider(Protocol):
     def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
 
@@ -31,11 +35,13 @@ class DashScopeEmbeddingClient:
         transport: httpx.BaseTransport | None = None,
         max_attempts: int = 4,
         backoff_seconds: float = 0.5,
+        concurrency: int = 4,
     ) -> None:
         self.model = model
         self.dimension = dimension
         self.max_attempts = max_attempts
         self.backoff_seconds = backoff_seconds
+        self.concurrency = concurrency
         self.client = httpx.Client(
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=60,
@@ -51,12 +57,16 @@ class DashScopeEmbeddingClient:
         ]
         if len(chunks) == 1:
             return self._embed_batch(chunks[0])
-        with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
+        with ThreadPoolExecutor(max_workers=min(self.concurrency, len(chunks))) as executor:
             batches = executor.map(self._embed_batch, chunks)
             return [vector for batch in batches for vector in batch]
 
     def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        response = self._post(texts)
+        try:
+            response = self._post(texts)
+        except _EmbeddingBatchRejected:
+            midpoint = len(texts) // 2
+            return self._embed_batch(texts[:midpoint]) + self._embed_batch(texts[midpoint:])
         try:
             items = sorted(response.json()["data"], key=lambda item: item["index"])
             vectors = [[float(value) for value in item["embedding"]] for item in items]
@@ -85,6 +95,8 @@ class DashScopeEmbeddingClient:
                 continue
             if response.status_code in {401, 403}:
                 raise EmbeddingError("embedding provider authentication or permission failed")
+            if response.status_code == 400 and len(texts) > 1:
+                raise _EmbeddingBatchRejected("embedding provider rejected a multi-input batch")
             if response.status_code in {408, 409, 429} or response.status_code >= 500:
                 if attempt < self.max_attempts:
                     self._backoff(attempt)

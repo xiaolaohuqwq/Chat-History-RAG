@@ -54,7 +54,10 @@ def ingest(
                     store,
                     LanceVectorStore(data_dir / "vectors", settings.embedding_dimension),
                     DashScopeEmbeddingClient(
-                        api_key, settings.embedding_model, settings.embedding_dimension
+                        api_key,
+                        settings.embedding_model,
+                        settings.embedding_dimension,
+                        concurrency=settings.embedding_concurrency,
                     ),
                     model=settings.embedding_model,
                     dimension=settings.embedding_dimension,
@@ -105,7 +108,10 @@ def search(
                 store,
                 LanceVectorStore(data_dir / "vectors", settings.embedding_dimension),
                 DashScopeEmbeddingClient(
-                    api_key, settings.embedding_model, settings.embedding_dimension
+                    api_key,
+                    settings.embedding_model,
+                    settings.embedding_dimension,
+                    concurrency=settings.embedding_concurrency,
                 ),
                 reranker=None if no_rerank else DashScopeReranker(api_key, settings.rerank_model),
             )
@@ -145,7 +151,10 @@ def ask(
                 store,
                 LanceVectorStore(data_dir / "vectors", settings.embedding_dimension),
                 DashScopeEmbeddingClient(
-                    embedding_key, settings.embedding_model, settings.embedding_dimension
+                    embedding_key,
+                    settings.embedding_model,
+                    settings.embedding_dimension,
+                    concurrency=settings.embedding_concurrency,
                 ),
                 reranker=None
                 if no_rerank
@@ -235,7 +244,10 @@ def evaluate_file(
                 store,
                 LanceVectorStore(data_dir / "vectors", settings.embedding_dimension),
                 DashScopeEmbeddingClient(
-                    embedding_key, settings.embedding_model, settings.embedding_dimension
+                    embedding_key,
+                    settings.embedding_model,
+                    settings.embedding_dimension,
+                    concurrency=settings.embedding_concurrency,
                 ),
                 reranker=DashScopeReranker(embedding_key, settings.rerank_model),
             )
@@ -270,6 +282,7 @@ def smoke_embedding() -> None:
             settings.require_embedding(),
             settings.embedding_model,
             settings.embedding_dimension,
+            concurrency=settings.embedding_concurrency,
         )
         vectors = client.embed_documents(
             [

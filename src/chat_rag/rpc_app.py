@@ -50,7 +50,10 @@ class RpcApplication:
     def _providers(self, no_rerank: bool):
         key = self.settings.require_embedding()
         embedder = DashScopeEmbeddingClient(
-            key, self.settings.embedding_model, self.settings.embedding_dimension
+            key,
+            self.settings.embedding_model,
+            self.settings.embedding_dimension,
+            concurrency=self.settings.embedding_concurrency,
         )
         reranker = None if no_rerank else DashScopeReranker(key, self.settings.rerank_model)
         return embedder, reranker
@@ -99,6 +102,7 @@ class RpcApplication:
                     embedding_key,
                     self.settings.embedding_model,
                     self.settings.embedding_dimension,
+                    concurrency=self.settings.embedding_concurrency,
                 ),
                 None if no_rerank else DashScopeReranker(embedding_key, self.settings.rerank_model),
             )
