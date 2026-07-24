@@ -75,16 +75,27 @@ def test_embedding_splits_logical_batch_at_provider_limit() -> None:
     request_sizes: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        size = len(json.loads(request.content)["input"])
+        inputs = json.loads(request.content)["input"]
+        size = len(inputs)
         request_sizes.append(size)
         return response(
             200,
-            {"data": [{"index": index, "embedding": [1.0, 2.0]} for index in range(size)]},
+            {
+                "data": [
+                    {
+                        "index": index,
+                        "embedding": [float(text.split()[-1]), float(text.split()[-1])],
+                    }
+                    for index, text in enumerate(inputs)
+                ]
+            },
         )
 
     transport = httpx.MockTransport(handler)
     client = DashScopeEmbeddingClient("secret", "model", 2, transport=transport, max_attempts=1)
     vectors = client.embed_documents([f"text {index}" for index in range(45)])
 
-    assert request_sizes == [20, 20, 5]
+    assert sorted(request_sizes) == [5, 20, 20]
     assert len(vectors) == 45
+    assert vectors[0] == [0.0, 0.0]
+    assert vectors[-1] == [44.0, 44.0]

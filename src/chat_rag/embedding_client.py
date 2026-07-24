@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
 
 import httpx
@@ -44,10 +45,15 @@ class DashScopeEmbeddingClient:
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        vectors: list[list[float]] = []
-        for offset in range(0, len(texts), self.provider_batch_limit):
-            vectors.extend(self._embed_batch(texts[offset : offset + self.provider_batch_limit]))
-        return vectors
+        chunks = [
+            texts[offset : offset + self.provider_batch_limit]
+            for offset in range(0, len(texts), self.provider_batch_limit)
+        ]
+        if len(chunks) == 1:
+            return self._embed_batch(chunks[0])
+        with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
+            batches = executor.map(self._embed_batch, chunks)
+            return [vector for batch in batches for vector in batch]
 
     def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         response = self._post(texts)
