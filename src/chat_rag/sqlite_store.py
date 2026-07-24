@@ -339,6 +339,14 @@ class SQLiteStore:
         dimension: int,
         started_at: datetime,
     ) -> int:
+        self.connection.execute(
+            """UPDATE ingestion_runs
+            SET status = 'interrupted',
+                error_summary = 'Superseded by a new ingestion run',
+                completed_at = ?
+            WHERE status = 'running'""",
+            (started_at.isoformat(),),
+        )
         cursor = self.connection.execute(
             """INSERT INTO ingestion_runs
             (source_id, source_fingerprint, byte_size, status, embedding_model,

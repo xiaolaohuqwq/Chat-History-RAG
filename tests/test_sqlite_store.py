@@ -37,3 +37,17 @@ def test_store_enables_wal_for_concurrent_tui_reads(tmp_path: Path) -> None:
         timeout = store.connection.execute("PRAGMA busy_timeout").fetchone()[0]
     assert mode == "wal"
     assert timeout >= 5_000
+
+
+def test_starting_run_marks_abandoned_running_run_interrupted(tmp_path: Path) -> None:
+    with SQLiteStore(tmp_path / "app.db") as store:
+        first = store.start_ingestion_run("source", "a" * 64, 1, "model", 3, datetime.now(UTC))
+        store.start_ingestion_run("source", "b" * 64, 2, "model", 3, datetime.now(UTC))
+        status, error_summary, completed_at = store.connection.execute(
+            """SELECT status, error_summary, completed_at
+            FROM ingestion_runs WHERE run_id = ?""",
+            (first,),
+        ).fetchone()
+    assert status == "interrupted"
+    assert error_summary == "Superseded by a new ingestion run"
+    assert completed_at is not None
