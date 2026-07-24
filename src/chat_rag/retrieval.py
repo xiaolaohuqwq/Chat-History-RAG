@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -18,6 +19,13 @@ class SearchResult:
     window: Window
     messages: tuple[Message, ...]
     score: float
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalTiming:
+    local_seconds: float
+    api_seconds: float
+    total_seconds: float
 
 
 def lexical_terms(query: str) -> list[str]:
@@ -50,6 +58,7 @@ class HybridRetriever:
         self.embedder = embedder
         self.reranker = reranker
         self.degraded_reason: str | None = None
+        self.last_timing: RetrievalTiming | None = None
 
     def search(
         self,
@@ -59,10 +68,18 @@ class HybridRetriever:
         lexical_limit: int = 40,
         limit: int = 30,
     ) -> list[SearchResult]:
+        started = time.perf_counter()
+        api_seconds = 0.0
+        local_seconds = 0.0
+        lexical_terms(query)
+        phase = time.perf_counter()
         vector = self.embedder.embed_query(query)
+        api_seconds += time.perf_counter() - phase
+        phase = time.perf_counter()
         vector_ids = [item.window_id for item in self.vectors.search(vector, vector_limit)]
         lexical_ids = self.store.lexical_search(query, lexical_limit)
         scores = reciprocal_rank_fusion([vector_ids, lexical_ids])
+        local_seconds += time.perf_counter() - phase
         ordered_ids = list(scores)
         self.degraded_reason = None
         if self.reranker is not None:
@@ -72,7 +89,9 @@ class HybridRetriever:
                 if (window := self.store.get_window(window_id)) is not None
             ]
             try:
+                phase = time.perf_counter()
                 reranked = self.reranker.rerank(query, candidates)
+                api_seconds += time.perf_counter() - phase
                 rerank_scores = dict(reranked)
                 reranked_ids = [window_id for window_id, _score in reranked]
                 ordered_ids = [
@@ -81,7 +100,9 @@ class HybridRetriever:
                 ]
                 scores.update(rerank_scores)
             except RuntimeError:
+                api_seconds += time.perf_counter() - phase
                 self.degraded_reason = "reranking unavailable"
+        phase = time.perf_counter()
         results: list[SearchResult] = []
         for window_id in ordered_ids[:limit]:
             window = self.store.get_window(window_id)
@@ -94,4 +115,10 @@ class HybridRetriever:
                     score=scores[window_id],
                 )
             )
+        local_seconds += time.perf_counter() - phase
+        self.last_timing = RetrievalTiming(
+            local_seconds=local_seconds,
+            api_seconds=api_seconds,
+            total_seconds=time.perf_counter() - started,
+        )
         return results

@@ -248,6 +248,8 @@ def evaluate_file(
     typer.echo(f"MRR: {report.mean_reciprocal_rank:.4f}")
     typer.echo(f"multi-sender coverage: {report.multi_sender_rate:.4f}")
     typer.echo(f"multi-date coverage: {report.multi_date_rate:.4f}")
+    typer.echo(f"local latency excluding cloud APIs: {report.local_latency_seconds:.3f}s")
+    typer.echo(f"cloud API latency: {report.api_latency_seconds:.3f}s")
     typer.echo(f"latency including cloud APIs: {report.total_latency_seconds:.3f}s")
 
 

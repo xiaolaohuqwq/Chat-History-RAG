@@ -69,11 +69,22 @@ def evaluate(
     reciprocal_rank = 0.0
     multi_sender = 0
     multi_date = 0
+    local_latency = 0.0
+    api_latency = 0.0
     total_latency = 0.0
     for case in cases:
         started = time.perf_counter()
         results = retrieve(case.query)
-        total_latency += time.perf_counter() - started
+        elapsed = time.perf_counter() - started
+        owner = getattr(retrieve, "__self__", None)
+        timing = getattr(owner, "last_timing", None)
+        if timing is None:
+            local_latency += elapsed
+            total_latency += elapsed
+        else:
+            local_latency += timing.local_seconds
+            api_latency += timing.api_seconds
+            total_latency += timing.total_seconds
         ids_20 = _message_ids(results, 20)
         ids_50 = _message_ids(results, 50)
         recall_20 += len(case.relevant_message_ids & set(ids_20)) / len(case.relevant_message_ids)
@@ -99,7 +110,7 @@ def evaluate(
         mean_reciprocal_rank=reciprocal_rank / count,
         multi_sender_rate=multi_sender / count,
         multi_date_rate=multi_date / count,
-        local_latency_seconds=0.0,
-        api_latency_seconds=total_latency,
+        local_latency_seconds=local_latency,
+        api_latency_seconds=api_latency,
         total_latency_seconds=total_latency,
     )
