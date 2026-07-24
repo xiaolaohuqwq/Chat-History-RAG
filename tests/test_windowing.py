@@ -74,3 +74,15 @@ def test_overlap_does_not_create_a_trailing_window_with_no_new_message() -> None
         overlap_messages=1,
     )
     assert len({window.window_id for window in windows}) == len(windows)
+
+
+def test_small_trailing_window_merges_when_combined_window_stays_below_maximum() -> None:
+    windows = build_windows(
+        [message(1, 0, "中" * 80), message(2, 1, "短")],
+        target_tokens=90,
+        max_tokens=150,
+        overlap_messages=0,
+    )
+    assert len(windows) == 1
+    assert windows[0].message_ids == ("m_1", "m_2")
+    assert windows[0].estimated_tokens <= 150

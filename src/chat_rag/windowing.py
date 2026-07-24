@@ -77,7 +77,7 @@ def _split_long_message(message: Message, max_tokens: int) -> list[Message]:
     return pieces
 
 
-def iter_windows(
+def _iter_raw_windows(
     messages: Iterable[Message],
     *,
     target_tokens: int = 500,
@@ -125,6 +125,64 @@ def iter_windows(
                 new_since_flush = 0
     if current and new_since_flush:
         yield _make_window(current)
+
+
+def _merge_window_pair(left: Window, right: Window) -> Window:
+    text = f"{left.text}\n{right.text}"
+    digest = hashlib.sha256(f"{WINDOWING_VERSION}\0{text}".encode()).hexdigest()
+    return Window(
+        window_id=f"w_{digest[:24]}",
+        source_id=left.source_id,
+        start_line=left.start_line,
+        end_line=right.end_line,
+        start_time=left.start_time,
+        end_time=right.end_time,
+        text=text,
+        estimated_tokens=estimate_tokens(text),
+        content_hash=digest,
+        windowing_version=WINDOWING_VERSION,
+        message_ids=(*left.message_ids, *right.message_ids),
+    )
+
+
+def iter_windows(
+    messages: Iterable[Message],
+    *,
+    target_tokens: int = 500,
+    max_tokens: int = 800,
+    overlap_messages: int = 2,
+    session_gap_minutes: int = 20,
+) -> Iterable[Window]:
+    trailing: list[Window] = []
+    for window in _iter_raw_windows(
+        messages,
+        target_tokens=target_tokens,
+        max_tokens=max_tokens,
+        overlap_messages=overlap_messages,
+        session_gap_minutes=session_gap_minutes,
+    ):
+        trailing.append(window)
+        if len(trailing) > 2:
+            yield trailing.pop(0)
+    if len(trailing) == 2:
+        left, right = trailing
+        combined_tokens = estimate_tokens(f"{left.text}\n{right.text}")
+        separated = not (set(left.message_ids) & set(right.message_ids))
+        same_session = (
+            left.end_time is None
+            or right.start_time is None
+            or right.start_time - left.end_time <= timedelta(minutes=session_gap_minutes)
+        )
+        if (
+            right.estimated_tokens < target_tokens // 2
+            and combined_tokens <= max_tokens
+            and left.source_id == right.source_id
+            and separated
+            and same_session
+        ):
+            yield _merge_window_pair(left, right)
+            return
+    yield from trailing
 
 
 def build_windows(
