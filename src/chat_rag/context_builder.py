@@ -40,15 +40,19 @@ def build_evidence_blocks(
     session_gap_minutes: int = 20,
 ) -> list[EvidenceBlock]:
     ranges: list[tuple[str, int, int, float]] = []
-    by_source: dict[str, list[Message]] = {}
     for result in results:
         source_id = result.window.source_id
-        source_messages = by_source.setdefault(source_id, store.get_source_messages(source_id))
-        positions = {message.message_id: index for index, message in enumerate(source_messages)}
+        source_messages = store.get_messages_near(
+            source_id,
+            result.window.start_line,
+            result.window.end_line,
+            adjacent_messages,
+        )
+        positions = {message.source_line: index for index, message in enumerate(source_messages)}
         seed_positions = [
-            positions[message_id]
-            for message_id in result.window.message_ids
-            if message_id in positions
+            index
+            for line in range(result.window.start_line, result.window.end_line + 1)
+            if (index := positions.get(line)) is not None
         ]
         if not seed_positions:
             continue
@@ -87,9 +91,7 @@ def build_evidence_blocks(
 
     blocks: list[EvidenceBlock] = []
     for index, (source_id, start, end, relevance) in enumerate(merged, start=1):
-        messages = tuple(
-            message for message in by_source[source_id] if start <= message.source_line <= end
-        )
+        messages = tuple(store.get_messages_between(source_id, start, end))
         blocks.append(EvidenceBlock(f"e{index}", source_id, start, end, messages, relevance))
     return sorted(blocks, key=lambda block: (-block.relevance, block.start_line))
 

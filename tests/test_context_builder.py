@@ -30,6 +30,9 @@ def test_adjacent_expansion_merges_overlapping_ranges(tmp_path: Path) -> None:
     with SQLiteStore(tmp_path / "app.db") as store:
         store.upsert_messages(messages)
         store.upsert_windows(windows)
+        store.get_source_messages = lambda source_id: (_ for _ in ()).throw(
+            AssertionError("context expansion must not load the entire source")
+        )
         results = [
             SearchResult(windows[0], (messages[1],), 1.0),
             SearchResult(windows[1], (messages[2],), 0.9),

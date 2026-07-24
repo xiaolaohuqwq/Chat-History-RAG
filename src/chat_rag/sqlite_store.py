@@ -404,12 +404,47 @@ class SQLiteStore:
         ]
         return [message for message_id in ids if (message := self.get_message(message_id))]
 
-    def get_source_messages(self, source_id: str) -> list[Message]:
+    def get_messages_near(
+        self,
+        source_id: str,
+        start_line: int,
+        end_line: int,
+        adjacent_messages: int,
+    ) -> list[Message]:
+        before_ids = [
+            str(row[0])
+            for row in self.connection.execute(
+                """SELECT message_id FROM messages WHERE source_id = ? AND source_line < ?
+                ORDER BY source_line DESC LIMIT ?""",
+                (source_id, start_line, adjacent_messages),
+            )
+        ]
+        inside_ids = [
+            str(row[0])
+            for row in self.connection.execute(
+                """SELECT message_id FROM messages WHERE source_id = ?
+                AND source_line BETWEEN ? AND ? ORDER BY source_line""",
+                (source_id, start_line, end_line),
+            )
+        ]
+        after_ids = [
+            str(row[0])
+            for row in self.connection.execute(
+                """SELECT message_id FROM messages WHERE source_id = ? AND source_line > ?
+                ORDER BY source_line LIMIT ?""",
+                (source_id, end_line, adjacent_messages),
+            )
+        ]
+        ids = [*reversed(before_ids), *inside_ids, *after_ids]
+        return [message for message_id in ids if (message := self.get_message(message_id))]
+
+    def get_messages_between(self, source_id: str, start_line: int, end_line: int) -> list[Message]:
         ids = [
             str(row[0])
             for row in self.connection.execute(
-                "SELECT message_id FROM messages WHERE source_id = ? ORDER BY source_line",
-                (source_id,),
+                """SELECT message_id FROM messages WHERE source_id = ?
+                AND source_line BETWEEN ? AND ? ORDER BY source_line""",
+                (source_id, start_line, end_line),
             )
         ]
         return [message for message_id in ids if (message := self.get_message(message_id))]
