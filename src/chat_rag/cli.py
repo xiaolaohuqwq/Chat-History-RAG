@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Annotated, NoReturn
 
@@ -12,6 +13,8 @@ from chat_rag.ingest import analyze_jsonl
 from chat_rag.llm_client import OpenAICompatibleClient
 from chat_rag.rerank_client import DashScopeReranker
 from chat_rag.retrieval import HybridRetriever
+from chat_rag.rpc import StdioServer
+from chat_rag.rpc_app import RpcApplication
 from chat_rag.service import ChatRAGService
 from chat_rag.sqlite_store import SQLiteStore
 from chat_rag.vector_ingestion import ingest_vectors
@@ -236,6 +239,14 @@ def evaluate_file(
     typer.echo(f"multi-sender coverage: {report.multi_sender_rate:.4f}")
     typer.echo(f"multi-date coverage: {report.multi_date_rate:.4f}")
     typer.echo(f"latency including cloud APIs: {report.total_latency_seconds:.3f}s")
+
+
+@app.command()
+def serve(stdio: Annotated[bool, typer.Option("--stdio")] = False) -> None:
+    """Run the versioned newline-delimited JSON protocol server."""
+    if not stdio:
+        _fail("serve currently requires --stdio")
+    StdioServer(RpcApplication(Settings())).serve(sys.stdin, sys.stdout)
 
 
 if __name__ == "__main__":
