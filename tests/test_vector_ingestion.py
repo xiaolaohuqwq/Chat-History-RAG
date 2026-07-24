@@ -4,9 +4,11 @@ from pathlib import Path
 import pytest
 
 from chat_rag.embedding_client import EmbeddingProvider
+from chat_rag.normalize import NORMALIZATION_VERSION
 from chat_rag.sqlite_store import SQLiteStore
 from chat_rag.vector_ingestion import IndexIdentityError, ingest_vectors
 from chat_rag.vector_store import VectorStore
+from chat_rag.windowing import WINDOWING_VERSION
 
 
 class FakeEmbedder(EmbeddingProvider):
@@ -255,3 +257,36 @@ def test_appending_source_replaces_obsolete_tail_windows(tmp_path: Path) -> None
 
         assert store.count("windows") == refreshed.window_count
         assert vectors.count() == refreshed.window_count
+
+
+def test_index_identity_includes_normalization_and_windowing_versions(tmp_path: Path) -> None:
+    source = source_file(tmp_path / "messages.jsonl", count=2)
+    with SQLiteStore(tmp_path / "app.db") as store:
+        ingest_vectors(
+            source,
+            store,
+            FakeVectors(),
+            FakeEmbedder(3),
+            model="embedding-v1",
+            dimension=3,
+            target_tokens=50,
+            max_tokens=80,
+        )
+        assert store.index_identity() == (
+            "embedding-v1",
+            3,
+            NORMALIZATION_VERSION,
+            WINDOWING_VERSION,
+        )
+        store.set_index_identity("embedding-v1", 3, "old-normalization", "old-windowing")
+        with pytest.raises(IndexIdentityError, match="rebuild"):
+            ingest_vectors(
+                source,
+                store,
+                FakeVectors(),
+                FakeEmbedder(3),
+                model="embedding-v1",
+                dimension=3,
+                target_tokens=50,
+                max_tokens=80,
+            )

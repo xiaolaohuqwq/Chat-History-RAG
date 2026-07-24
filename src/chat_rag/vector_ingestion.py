@@ -6,9 +6,10 @@ from pathlib import Path
 
 from chat_rag.embedding_client import EmbeddingProvider
 from chat_rag.ingest import iter_messages, source_fingerprint
+from chat_rag.normalize import NORMALIZATION_VERSION
 from chat_rag.sqlite_store import SQLiteStore
 from chat_rag.vector_store import VectorStore
-from chat_rag.windowing import iter_windows
+from chat_rag.windowing import WINDOWING_VERSION, iter_windows
 
 
 class IndexIdentityError(RuntimeError):
@@ -109,11 +110,17 @@ def ingest_vectors(
 
     try:
         identities = store.embedding_identities()
-        requested_identity = (model, dimension)
+        stored_identity = store.index_identity()
+        requested_identity = (model, dimension, NORMALIZATION_VERSION, WINDOWING_VERSION)
         if rebuild:
             vectors.clear()
             store.clear_embeddings()
-        elif identities and identities != {requested_identity}:
+            store.clear_index_identity()
+        elif stored_identity is not None and stored_identity != requested_identity:
+            raise IndexIdentityError(
+                "embedding or text-processing identity changed; rerun with --rebuild-vectors"
+            )
+        elif stored_identity is None and identities and identities != {(model, dimension)}:
             raise IndexIdentityError(
                 "embedding model or dimension changed; rerun with --rebuild-vectors"
             )
@@ -151,5 +158,6 @@ def ingest_vectors(
         checkpoint("failed", error_summary=type(error).__name__, completed_at=datetime.now(UTC))
         raise
 
+    store.set_index_identity(*requested_identity)
     checkpoint("completed", completed_at=datetime.now(UTC))
     return IngestionReport(message_count, window_count, embedded, stats.malformed_rows)

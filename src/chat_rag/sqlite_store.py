@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
     completed_at TEXT
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS windows_fts USING fts5(window_id UNINDEXED, text);
+CREATE TABLE IF NOT EXISTS index_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -208,6 +212,46 @@ class SQLiteStore:
                 WHERE embedding_model IS NOT NULL AND embedding_dimension IS NOT NULL"""
             )
         }
+
+    def index_identity(self) -> tuple[str, int, str, str] | None:
+        values = dict(self.connection.execute("SELECT key, value FROM index_metadata"))
+        required = (
+            "embedding_model",
+            "embedding_dimension",
+            "normalization_version",
+            "windowing_version",
+        )
+        if any(key not in values for key in required):
+            return None
+        return (
+            values["embedding_model"],
+            int(values["embedding_dimension"]),
+            values["normalization_version"],
+            values["windowing_version"],
+        )
+
+    def set_index_identity(
+        self,
+        model: str,
+        dimension: int,
+        normalization_version: str,
+        windowing_version: str,
+    ) -> None:
+        self.connection.executemany(
+            """INSERT INTO index_metadata VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+            [
+                ("embedding_model", model),
+                ("embedding_dimension", str(dimension)),
+                ("normalization_version", normalization_version),
+                ("windowing_version", windowing_version),
+            ],
+        )
+        self.connection.commit()
+
+    def clear_index_identity(self) -> None:
+        self.connection.execute("DELETE FROM index_metadata")
+        self.connection.commit()
 
     def clear_embeddings(self) -> None:
         self.connection.execute(

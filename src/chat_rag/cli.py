@@ -204,6 +204,10 @@ def stats() -> None:
         identities = sorted(store.embedding_identities())
         identity = ", ".join(f"{model}/{dimension}" for model, dimension in identities) or "none"
         typer.echo(f"index identity: {identity}")
+        full_identity = store.index_identity()
+        if full_identity is not None:
+            typer.echo(f"normalization version: {full_identity[2]}")
+            typer.echo(f"windowing version: {full_identity[3]}")
         run = store.latest_ingestion_run()
         if run is not None:
             typer.echo(f"source fingerprint: {run['source_fingerprint']}")
