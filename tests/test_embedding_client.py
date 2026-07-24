@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -67,3 +69,22 @@ def test_embedding_rejects_wrong_vector_dimension() -> None:
     client = DashScopeEmbeddingClient("secret", "model", 2, transport=transport, max_attempts=1)
     with pytest.raises(EmbeddingError, match="dimension"):
         client.embed_documents(["text"])
+
+
+def test_embedding_splits_logical_batch_at_provider_limit() -> None:
+    request_sizes: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        size = len(json.loads(request.content)["input"])
+        request_sizes.append(size)
+        return response(
+            200,
+            {"data": [{"index": index, "embedding": [1.0, 2.0]} for index in range(size)]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = DashScopeEmbeddingClient("secret", "model", 2, transport=transport, max_attempts=1)
+    vectors = client.embed_documents([f"text {index}" for index in range(45)])
+
+    assert request_sizes == [20, 20, 5]
+    assert len(vectors) == 45

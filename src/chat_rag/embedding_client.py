@@ -19,6 +19,7 @@ class EmbeddingProvider(Protocol):
 
 class DashScopeEmbeddingClient:
     endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"
+    provider_batch_limit = 20
 
     def __init__(
         self,
@@ -43,6 +44,12 @@ class DashScopeEmbeddingClient:
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        vectors: list[list[float]] = []
+        for offset in range(0, len(texts), self.provider_batch_limit):
+            vectors.extend(self._embed_batch(texts[offset : offset + self.provider_batch_limit]))
+        return vectors
+
+    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         response = self._post(texts)
         try:
             items = sorted(response.json()["data"], key=lambda item: item["index"])
