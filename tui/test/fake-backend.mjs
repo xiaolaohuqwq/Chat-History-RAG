@@ -14,6 +14,7 @@ lines.on("line", (line) => {
     send("result", { cancelled: true });
   } else if (request.method === "ask") {
     send("progress", { stage: "retrieval" });
+    if (request.params.question === "wait") return;
     send("answer_delta", { text: "测试答案 [m1]" });
     send("result", { answer: "测试答案 [m1]", citations: ["m1"] });
   } else if (request.method === "inspect") {
@@ -22,4 +23,3 @@ lines.on("line", (line) => {
     send("result", { messages: 3, windows: 2, vectors: 2 });
   }
 });
-

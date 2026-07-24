@@ -29,8 +29,9 @@ describe("BackendClient", () => {
   it("propagates AbortSignal as a cancel request", async () => {
     client = new BackendClient(process.execPath, [path.join(here, "fake-backend.mjs")]);
     const controller = new AbortController();
-    controller.abort();
-    await expect(client.request("ask", { question: "cancel" }, undefined, controller.signal)).rejects.toThrow("cancelled");
+    const request = client.request("ask", { question: "wait" }, undefined, controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    await expect(request).rejects.toThrow("cancelled");
+    await expect(client.request("stats", {})).resolves.toMatchObject({ messages: 3 });
   });
 });
-
