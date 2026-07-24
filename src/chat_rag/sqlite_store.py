@@ -182,3 +182,46 @@ class SQLiteStore:
             )
         )
         return Window(*row[:4], _datetime(row[4]), _datetime(row[5]), *row[6:], message_ids=ids)
+
+    def embedding_identities(self) -> set[tuple[str, int]]:
+        return {
+            (str(row[0]), int(row[1]))
+            for row in self.connection.execute(
+                """SELECT DISTINCT embedding_model, embedding_dimension FROM windows
+                WHERE embedding_model IS NOT NULL AND embedding_dimension IS NOT NULL"""
+            )
+        }
+
+    def clear_embeddings(self) -> None:
+        self.connection.execute(
+            """UPDATE windows SET embedding_model = NULL,
+            embedding_dimension = NULL, embedded_at = NULL"""
+        )
+        self.connection.commit()
+
+    def windows_needing_embedding(self, model: str, dimension: int) -> list[Window]:
+        ids = [
+            str(row[0])
+            for row in self.connection.execute(
+                """SELECT window_id FROM windows
+                WHERE embedding_model IS NULL OR embedding_model != ?
+                   OR embedding_dimension IS NULL OR embedding_dimension != ?
+                ORDER BY source_id, start_line""",
+                (model, dimension),
+            )
+        ]
+        return [window for window_id in ids if (window := self.get_window(window_id)) is not None]
+
+    def mark_embedded(
+        self,
+        window_ids: list[str],
+        model: str,
+        dimension: int,
+        embedded_at: datetime,
+    ) -> None:
+        self.connection.executemany(
+            """UPDATE windows SET embedding_model = ?, embedding_dimension = ?, embedded_at = ?
+            WHERE window_id = ?""",
+            [(model, dimension, embedded_at.isoformat(), window_id) for window_id in window_ids],
+        )
+        self.connection.commit()
