@@ -12,6 +12,11 @@ NAME="$1"
 INPUT_FILE="${NAME}.json"
 OUTPUT_FILE="${NAME}.jsonl"
 
+if ! command -v jq >/dev/null 2>&1; then
+    echo "错误: 未安装 jq，无法转换 JSON。" >&2
+    exit 1
+fi
+
 # 2. 检查输入文件是否存在
 if [ ! -f "$INPUT_FILE" ]; then
     echo "错误: 找不到输入文件 '$INPUT_FILE'。"
@@ -19,6 +24,11 @@ if [ ! -f "$INPUT_FILE" ]; then
 fi
 
 echo "正在处理 ${INPUT_FILE} -> ${OUTPUT_FILE} ..."
+
+# Write beside the destination and replace it only after jq succeeds. This keeps
+# a malformed refresh from truncating an existing private index input.
+TMP_FILE=$(mktemp ".${NAME}.jsonl.tmp.XXXXXX") || exit 1
+trap 'rm -f "$TMP_FILE"' EXIT
 
 # 3. 执行 jq 一步到位提取并过滤
 # 逻辑：展开 messages 数组 -> 根据 content.text 过滤无用信息 -> 重组为单层 JSON 对象
@@ -34,10 +44,12 @@ jq -c '
       name: .sender.name, 
       text: .content.text
     }
-' "$INPUT_FILE" > "$OUTPUT_FILE"
+' "$INPUT_FILE" > "$TMP_FILE"
 
 # 4. 检查是否执行成功
 if [ $? -eq 0 ]; then
+    mv "$TMP_FILE" "$OUTPUT_FILE"
+    trap - EXIT
     echo "转换成功！结果已保存至: ${OUTPUT_FILE}"
 else
     echo "转换失败，请检查 jq 命令或 JSON 文件格式。"
