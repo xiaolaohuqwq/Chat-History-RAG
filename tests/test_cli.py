@@ -61,3 +61,15 @@ def test_inspect_resolves_message_id(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "甲" in result.stdout
     assert "原始内容" in result.stdout
+
+
+def test_ask_reports_missing_configuration_without_traceback(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+
+    result = CliRunner().invoke(app, ["ask", "发生了什么？"])
+
+    assert result.exit_code != 0
+    assert "required" in result.output
+    assert "Traceback" not in result.output
