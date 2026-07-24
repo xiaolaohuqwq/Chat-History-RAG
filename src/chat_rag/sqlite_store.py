@@ -237,6 +237,16 @@ class SQLiteStore:
         ]
         return [message for message_id in ids if (message := self.get_message(message_id))]
 
+    def get_source_messages(self, source_id: str) -> list[Message]:
+        ids = [
+            str(row[0])
+            for row in self.connection.execute(
+                "SELECT message_id FROM messages WHERE source_id = ? ORDER BY source_line",
+                (source_id,),
+            )
+        ]
+        return [message for message_id in ids if (message := self.get_message(message_id))]
+
     def lexical_search(self, query: str, limit: int) -> list[str]:
         from chat_rag.retrieval import lexical_terms
 
