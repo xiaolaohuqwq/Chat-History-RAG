@@ -10,6 +10,6 @@ def test_evidence_card_rejects_ids_outside_its_input_batch() -> None:
 
 
 def test_citation_validation_only_accepts_provided_message_ids() -> None:
-    answer = "结论来自 [m1]，另一个说法来自 [m_fake]。"
-    assert invalid_citations(answer, {"m1", "m2"}) == {"m_fake"}
+    answer = "结论来自 [m1]，另一个说法来自 [m_fake]，窗口引用 [w_fake] 也不合法。"
+    assert invalid_citations(answer, {"m1", "m2"}) == {"m_fake", "w_fake"}
     assert invalid_citations("没有引用", {"m1"}) == set()

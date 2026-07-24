@@ -23,7 +23,7 @@ def validate_card_sources(card: EvidenceCard, allowed_ids: set[str]) -> None:
         raise ValueError("evidence card cites message IDs outside its input batch")
 
 
-_CITATION_PATTERN = re.compile(r"\[(m[A-Za-z0-9_-]*)\]")
+_CITATION_PATTERN = re.compile(r"\[([A-Za-z][A-Za-z0-9_-]*)\]")
 
 
 def cited_ids(answer: str) -> set[str]:
