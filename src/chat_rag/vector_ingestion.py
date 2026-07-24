@@ -110,13 +110,15 @@ def ingest_vectors(
     try:
         identities = store.embedding_identities()
         requested_identity = (model, dimension)
-        if identities and identities != {requested_identity}:
-            if not rebuild:
-                raise IndexIdentityError(
-                    "embedding model or dimension changed; rerun with --rebuild-vectors"
-                )
+        if rebuild:
             vectors.clear()
             store.clear_embeddings()
+        elif identities and identities != {requested_identity}:
+            raise IndexIdentityError(
+                "embedding model or dimension changed; rerun with --rebuild-vectors"
+            )
+
+        store.begin_window_refresh()
 
         windows = iter_windows(
             persisted_messages(),
@@ -132,13 +134,16 @@ def ingest_vectors(
             estimated_tokens += window.estimated_tokens
             if len(window_batch) >= persistence_batch_size:
                 store.upsert_windows(window_batch)
+                store.record_current_windows([window.window_id for window in window_batch])
                 window_batch = []
                 embedded += embed_pending_batch()
                 checkpoint()
         if window_batch:
             store.upsert_windows(window_batch)
+            store.record_current_windows([window.window_id for window in window_batch])
             embedded += embed_pending_batch()
             checkpoint()
+        vectors.delete(store.finish_window_refresh(source_id))
         while completed := embed_pending_batch():
             embedded += completed
             checkpoint()

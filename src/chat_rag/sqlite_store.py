@@ -250,6 +250,40 @@ class SQLiteStore:
         )
         self.connection.commit()
 
+    def begin_window_refresh(self) -> None:
+        self.connection.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS current_windows (window_id TEXT PRIMARY KEY)"
+        )
+        self.connection.execute("DELETE FROM current_windows")
+
+    def record_current_windows(self, window_ids: list[str]) -> None:
+        self.connection.executemany(
+            "INSERT OR IGNORE INTO current_windows VALUES (?)",
+            [(window_id,) for window_id in window_ids],
+        )
+
+    def finish_window_refresh(self, source_id: str) -> list[str]:
+        stale_ids = [
+            str(row[0])
+            for row in self.connection.execute(
+                """SELECT window_id FROM windows WHERE source_id = ?
+                AND window_id NOT IN (SELECT window_id FROM current_windows)""",
+                (source_id,),
+            )
+        ]
+        if stale_ids:
+            self.connection.executemany(
+                "DELETE FROM windows_fts WHERE window_id = ?",
+                [(window_id,) for window_id in stale_ids],
+            )
+            self.connection.executemany(
+                "DELETE FROM windows WHERE window_id = ?",
+                [(window_id,) for window_id in stale_ids],
+            )
+        self.connection.execute("DELETE FROM current_windows")
+        self.connection.commit()
+        return stale_ids
+
     def start_ingestion_run(
         self,
         source_id: str,

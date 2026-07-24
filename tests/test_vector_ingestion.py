@@ -41,6 +41,10 @@ class FakeVectors(VectorStore):
     def clear(self) -> None:
         self.rows.clear()
 
+    def delete(self, window_ids: list[str]) -> None:
+        for window_id in window_ids:
+            self.rows.pop(window_id, None)
+
 
 def source_file(path: Path, count: int = 5) -> Path:
     rows = [
@@ -85,6 +89,22 @@ def test_unchanged_reingestion_makes_zero_embedding_calls(tmp_path: Path) -> Non
         )
         assert repeated.embedded_windows == 0
         assert second.calls == []
+
+        rebuilt = FakeEmbedder(3)
+        rebuilt_report = ingest_vectors(
+            source,
+            store,
+            vectors,
+            rebuilt,
+            model="embedding-v1",
+            dimension=3,
+            batch_size=2,
+            target_tokens=50,
+            max_tokens=80,
+            rebuild=True,
+        )
+        assert rebuilt_report.embedded_windows == rebuilt_report.window_count
+        assert rebuilt.calls
 
 
 def test_interrupted_batches_resume_and_identity_change_requires_rebuild(tmp_path: Path) -> None:
@@ -205,3 +225,33 @@ def test_failed_ingestion_run_is_recorded_without_provider_error_body(tmp_path: 
     assert run is not None
     assert run["status"] == "failed"
     assert run["error_summary"] == "RuntimeError"
+
+
+def test_appending_source_replaces_obsolete_tail_windows(tmp_path: Path) -> None:
+    source = source_file(tmp_path / "messages.jsonl", count=3)
+    vectors = FakeVectors()
+    with SQLiteStore(tmp_path / "app.db") as store:
+        ingest_vectors(
+            source,
+            store,
+            vectors,
+            FakeEmbedder(3),
+            model="embedding-v1",
+            dimension=3,
+            target_tokens=200,
+            max_tokens=250,
+        )
+        source_file(source, count=4)
+        refreshed = ingest_vectors(
+            source,
+            store,
+            vectors,
+            FakeEmbedder(3),
+            model="embedding-v1",
+            dimension=3,
+            target_tokens=200,
+            max_tokens=250,
+        )
+
+        assert store.count("windows") == refreshed.window_count
+        assert vectors.count() == refreshed.window_count

@@ -22,6 +22,8 @@ class VectorStore(Protocol):
 
     def clear(self) -> None: ...
 
+    def delete(self, window_ids: list[str]) -> None: ...
+
 
 class LanceVectorStore:
     table_name = "windows"
@@ -69,3 +71,14 @@ class LanceVectorStore:
     def clear(self) -> None:
         if self._table() is not None:
             self.database.drop_table(self.table_name)
+
+    def delete(self, window_ids: list[str]) -> None:
+        if not window_ids:
+            return
+        table = self._table()
+        if table is None:
+            return
+        for offset in range(0, len(window_ids), 500):
+            batch = window_ids[offset : offset + 500]
+            quoted = ",".join(f"'{window_id}'" for window_id in batch)
+            table.delete(f"window_id IN ({quoted})")
