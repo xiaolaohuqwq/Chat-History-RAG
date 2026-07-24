@@ -225,3 +225,43 @@ class SQLiteStore:
             [(model, dimension, embedded_at.isoformat(), window_id) for window_id in window_ids],
         )
         self.connection.commit()
+
+    def get_window_messages(self, window_id: str) -> list[Message]:
+        ids = [
+            str(row[0])
+            for row in self.connection.execute(
+                """SELECT message_id FROM window_messages
+                WHERE window_id = ? ORDER BY position""",
+                (window_id,),
+            )
+        ]
+        return [message for message_id in ids if (message := self.get_message(message_id))]
+
+    def lexical_search(self, query: str, limit: int) -> list[str]:
+        from chat_rag.retrieval import lexical_terms
+
+        terms = lexical_terms(query)
+        fts_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
+        fts_ids = [
+            str(row[0])
+            for row in self.connection.execute(
+                """SELECT window_id FROM windows_fts WHERE windows_fts MATCH ?
+                ORDER BY bm25(windows_fts), window_id LIMIT ?""",
+                (fts_query, limit),
+            )
+        ]
+        fragment = "".join(terms)
+        escaped = fragment.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        substring_ids = [
+            str(row[0])
+            for row in self.connection.execute(
+                """SELECT window_id FROM windows WHERE text LIKE ? ESCAPE '\\'
+                ORDER BY start_line, window_id LIMIT ?""",
+                (f"%{escaped}%", limit),
+            )
+        ]
+        combined: list[str] = []
+        for window_id in [*fts_ids, *substring_ids]:
+            if window_id not in combined:
+                combined.append(window_id)
+        return combined[:limit]
