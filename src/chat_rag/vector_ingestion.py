@@ -5,10 +5,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from chat_rag.embedding_client import EmbeddingProvider
-from chat_rag.ingest import iter_messages
+from chat_rag.ingest import iter_messages, source_fingerprint
 from chat_rag.sqlite_store import SQLiteStore
 from chat_rag.vector_store import VectorStore
-from chat_rag.windowing import build_windows
+from chat_rag.windowing import iter_windows
 
 
 class IndexIdentityError(RuntimeError):
@@ -32,38 +32,69 @@ def ingest_vectors(
     model: str,
     dimension: int,
     batch_size: int = 64,
+    persistence_batch_size: int = 500,
     target_tokens: int = 500,
     max_tokens: int = 800,
     overlap_messages: int = 2,
     session_gap_minutes: int = 20,
     rebuild: bool = False,
 ) -> IngestionReport:
-    identities = store.embedding_identities()
-    requested_identity = (model, dimension)
-    if identities and identities != {requested_identity}:
-        if not rebuild:
-            raise IndexIdentityError(
-                "embedding model or dimension changed; rerun with --rebuild-vectors"
-            )
-        vectors.clear()
-        store.clear_embeddings()
-
-    message_iterator, stats = iter_messages(path)
-    messages = list(message_iterator)
-    windows = build_windows(
-        messages,
-        target_tokens=target_tokens,
-        max_tokens=max_tokens,
-        overlap_messages=overlap_messages,
-        session_gap_minutes=session_gap_minutes,
+    if batch_size <= 0 or persistence_batch_size <= 0:
+        raise ValueError("ingestion batch sizes must be positive")
+    source_id = f"file:{path.resolve()}"
+    run_id = store.start_ingestion_run(
+        source_id,
+        source_fingerprint(path),
+        path.stat().st_size,
+        model,
+        dimension,
+        datetime.now(UTC),
     )
-    store.upsert_messages(messages)
-    store.upsert_windows(windows)
-
-    pending = store.windows_needing_embedding(model, dimension)
+    message_count = 0
+    window_count = 0
+    estimated_tokens = 0
     embedded = 0
-    for offset in range(0, len(pending), batch_size):
-        batch = pending[offset : offset + batch_size]
+    message_iterator, stats = iter_messages(path)
+
+    def checkpoint(
+        status: str = "running",
+        *,
+        error_summary: str | None = None,
+        completed_at: datetime | None = None,
+    ) -> None:
+        store.update_ingestion_run(
+            run_id,
+            last_completed_line=stats.total_rows,
+            message_count=message_count,
+            window_count=window_count,
+            malformed_count=stats.malformed_rows,
+            estimated_tokens=estimated_tokens,
+            status=status,
+            error_summary=error_summary,
+            completed_at=completed_at,
+        )
+
+    def persisted_messages():
+        nonlocal message_count
+        batch = []
+        for message in message_iterator:
+            batch.append(message)
+            if len(batch) >= persistence_batch_size:
+                store.upsert_messages(batch)
+                message_count += len(batch)
+                checkpoint()
+                yield from batch
+                batch = []
+        if batch:
+            store.upsert_messages(batch)
+            message_count += len(batch)
+            checkpoint()
+            yield from batch
+
+    def embed_pending_batch() -> int:
+        batch = store.windows_needing_embedding(model, dimension, limit=batch_size)
+        if not batch:
+            return 0
         result = embedder.embed_documents([window.text for window in batch])
         if len(result) != len(batch) or any(len(vector) != dimension for vector in result):
             raise ValueError(
@@ -74,11 +105,46 @@ def ingest_vectors(
         store.mark_embedded(
             [window.window_id for window in batch], model, dimension, datetime.now(UTC)
         )
-        embedded += len(batch)
+        return len(batch)
 
-    return IngestionReport(
-        message_count=len(messages),
-        window_count=len(windows),
-        embedded_windows=embedded,
-        malformed_rows=stats.malformed_rows,
-    )
+    try:
+        identities = store.embedding_identities()
+        requested_identity = (model, dimension)
+        if identities and identities != {requested_identity}:
+            if not rebuild:
+                raise IndexIdentityError(
+                    "embedding model or dimension changed; rerun with --rebuild-vectors"
+                )
+            vectors.clear()
+            store.clear_embeddings()
+
+        windows = iter_windows(
+            persisted_messages(),
+            target_tokens=target_tokens,
+            max_tokens=max_tokens,
+            overlap_messages=overlap_messages,
+            session_gap_minutes=session_gap_minutes,
+        )
+        window_batch = []
+        for window in windows:
+            window_batch.append(window)
+            window_count += 1
+            estimated_tokens += window.estimated_tokens
+            if len(window_batch) >= persistence_batch_size:
+                store.upsert_windows(window_batch)
+                window_batch = []
+                embedded += embed_pending_batch()
+                checkpoint()
+        if window_batch:
+            store.upsert_windows(window_batch)
+            embedded += embed_pending_batch()
+            checkpoint()
+        while completed := embed_pending_batch():
+            embedded += completed
+            checkpoint()
+    except Exception as error:
+        checkpoint("failed", error_summary=type(error).__name__, completed_at=datetime.now(UTC))
+        raise
+
+    checkpoint("completed", completed_at=datetime.now(UTC))
+    return IngestionReport(message_count, window_count, embedded, stats.malformed_rows)

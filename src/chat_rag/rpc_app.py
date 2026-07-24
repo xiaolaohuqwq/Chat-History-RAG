@@ -161,6 +161,7 @@ class RpcApplication:
                 "index_identities": [
                     {"model": model, "dimension": dimension} for model, dimension in identities
                 ],
+                "last_ingestion": store.latest_ingestion_run(),
             }
         counts["vectors"] = LanceVectorStore(
             data_dir / "vectors", self.settings.embedding_dimension

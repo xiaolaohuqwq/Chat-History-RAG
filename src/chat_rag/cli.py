@@ -204,6 +204,12 @@ def stats() -> None:
         identities = sorted(store.embedding_identities())
         identity = ", ".join(f"{model}/{dimension}" for model, dimension in identities) or "none"
         typer.echo(f"index identity: {identity}")
+        run = store.latest_ingestion_run()
+        if run is not None:
+            typer.echo(f"source fingerprint: {run['source_fingerprint']}")
+            typer.echo(f"last ingestion status: {run['status']}")
+            typer.echo(f"malformed rows: {run['malformed_count']:,}")
+            typer.echo(f"estimated API spend: CNY {run['estimated_cost_cny']:.6f}")
     vectors = LanceVectorStore(data_dir / "vectors", settings.embedding_dimension)
     typer.echo(f"vectors: {vectors.count():,}")
 

@@ -132,3 +132,76 @@ def test_interrupted_batches_resume_and_identity_change_requires_rebuild(tmp_pat
                 dimension=4,
                 rebuild=False,
             )
+
+
+def test_ingestion_starts_embedding_before_entire_source_is_materialized(tmp_path: Path) -> None:
+    source = source_file(tmp_path / "messages.jsonl", count=100)
+    vectors = FakeVectors()
+    observed_message_counts: list[int] = []
+
+    class ObservingEmbedder(FakeEmbedder):
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            observed_message_counts.append(store.count("messages"))
+            return super().embed_documents(texts)
+
+    with SQLiteStore(tmp_path / "app.db") as store:
+        ingest_vectors(
+            source,
+            store,
+            vectors,
+            ObservingEmbedder(3),
+            model="embedding-v1",
+            dimension=3,
+            batch_size=1,
+            persistence_batch_size=10,
+            target_tokens=50,
+            max_tokens=80,
+        )
+
+    assert observed_message_counts
+    assert observed_message_counts[0] < 100
+
+
+def test_ingestion_run_records_fingerprint_progress_and_cost(tmp_path: Path) -> None:
+    source = source_file(tmp_path / "messages.jsonl", count=3)
+    with SQLiteStore(tmp_path / "app.db") as store:
+        report = ingest_vectors(
+            source,
+            store,
+            FakeVectors(),
+            FakeEmbedder(3),
+            model="embedding-v1",
+            dimension=3,
+            target_tokens=50,
+            max_tokens=80,
+        )
+        run = store.latest_ingestion_run()
+
+    assert run is not None
+    assert run["status"] == "completed"
+    assert len(run["source_fingerprint"]) == 64
+    assert run["last_completed_line"] == 3
+    assert run["message_count"] == report.message_count
+    assert run["window_count"] == report.window_count
+    assert run["estimated_cost_cny"] >= 0
+
+
+def test_failed_ingestion_run_is_recorded_without_provider_error_body(tmp_path: Path) -> None:
+    source = source_file(tmp_path / "messages.jsonl", count=3)
+    with SQLiteStore(tmp_path / "app.db") as store:
+        with pytest.raises(RuntimeError):
+            ingest_vectors(
+                source,
+                store,
+                FakeVectors(),
+                FakeEmbedder(3, fail_call=1),
+                model="embedding-v1",
+                dimension=3,
+                target_tokens=50,
+                max_tokens=80,
+            )
+        run = store.latest_ingestion_run()
+
+    assert run is not None
+    assert run["status"] == "failed"
+    assert run["error_summary"] == "RuntimeError"

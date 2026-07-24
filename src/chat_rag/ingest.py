@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -7,13 +8,21 @@ from typing import Any
 
 from chat_rag.domain import DryRunReport, Message, ParseStats
 from chat_rag.normalize import content_hash, make_message_id, normalize_text, parse_time
-from chat_rag.windowing import build_windows
+from chat_rag.windowing import iter_windows
 
 REQUIRED_FIELDS = ("time", "uid", "name", "text")
 
 
 def _source_id(path: Path) -> str:
     return f"file:{path.resolve()}"
+
+
+def source_fingerprint(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def iter_messages(path: Path) -> tuple[Iterator[Message], ParseStats]:
@@ -75,18 +84,22 @@ def analyze_jsonl(
     embedding_dimension: int = 1024,
 ) -> DryRunReport:
     messages, stats = iter_messages(path)
-    windows = build_windows(
+    windows = iter_windows(
         messages,
         target_tokens=target_tokens,
         max_tokens=max_tokens,
         overlap_messages=overlap_messages,
         session_gap_minutes=session_gap_minutes,
     )
-    estimated_tokens = sum(window.estimated_tokens for window in windows)
+    window_count = 0
+    estimated_tokens = 0
+    for window in windows:
+        window_count += 1
+        estimated_tokens += window.estimated_tokens
     return DryRunReport(
         rows=stats,
-        window_count=len(windows),
+        window_count=window_count,
         estimated_tokens=estimated_tokens,
         estimated_cost_cny=estimated_tokens * 0.5 / 1_000_000,
-        estimated_vector_bytes=len(windows) * embedding_dimension * 4,
+        estimated_vector_bytes=window_count * embedding_dimension * 4,
     )

@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
     status TEXT NOT NULL,
     embedding_model TEXT,
     embedding_dimension INTEGER,
+    estimated_tokens INTEGER NOT NULL DEFAULT 0,
+    estimated_cost_cny REAL NOT NULL DEFAULT 0,
     error_summary TEXT,
     started_at TEXT NOT NULL,
     completed_at TEXT
@@ -75,6 +77,7 @@ class SQLiteStore:
         self.connection = sqlite3.connect(path)
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.executescript(SCHEMA)
+        self._migrate_schema()
 
     def __enter__(self) -> SQLiteStore:
         return self
@@ -84,6 +87,20 @@ class SQLiteStore:
 
     def close(self) -> None:
         self.connection.close()
+
+    def _migrate_schema(self) -> None:
+        columns = {
+            str(row[1]) for row in self.connection.execute("PRAGMA table_info(ingestion_runs)")
+        }
+        if "estimated_tokens" not in columns:
+            self.connection.execute(
+                "ALTER TABLE ingestion_runs ADD COLUMN estimated_tokens INTEGER NOT NULL DEFAULT 0"
+            )
+        if "estimated_cost_cny" not in columns:
+            self.connection.execute(
+                "ALTER TABLE ingestion_runs ADD COLUMN estimated_cost_cny REAL NOT NULL DEFAULT 0"
+            )
+        self.connection.commit()
 
     def count(self, table: str) -> int:
         if table not in {"messages", "windows", "window_messages", "ingestion_runs"}:
@@ -199,15 +216,22 @@ class SQLiteStore:
         )
         self.connection.commit()
 
-    def windows_needing_embedding(self, model: str, dimension: int) -> list[Window]:
+    def windows_needing_embedding(
+        self, model: str, dimension: int, *, limit: int | None = None
+    ) -> list[Window]:
+        limit_clause = " LIMIT ?" if limit is not None else ""
+        parameters: tuple[object, ...] = (
+            (model, dimension, limit) if limit is not None else (model, dimension)
+        )
         ids = [
             str(row[0])
             for row in self.connection.execute(
                 """SELECT window_id FROM windows
                 WHERE embedding_model IS NULL OR embedding_model != ?
                    OR embedding_dimension IS NULL OR embedding_dimension != ?
-                ORDER BY source_id, start_line""",
-                (model, dimension),
+                ORDER BY source_id, start_line"""
+                + limit_clause,
+                parameters,
             )
         ]
         return [window for window_id in ids if (window := self.get_window(window_id)) is not None]
@@ -225,6 +249,71 @@ class SQLiteStore:
             [(model, dimension, embedded_at.isoformat(), window_id) for window_id in window_ids],
         )
         self.connection.commit()
+
+    def start_ingestion_run(
+        self,
+        source_id: str,
+        source_fingerprint: str,
+        byte_size: int,
+        model: str,
+        dimension: int,
+        started_at: datetime,
+    ) -> int:
+        cursor = self.connection.execute(
+            """INSERT INTO ingestion_runs
+            (source_id, source_fingerprint, byte_size, status, embedding_model,
+             embedding_dimension, started_at)
+            VALUES (?, ?, ?, 'running', ?, ?, ?)""",
+            (source_id, source_fingerprint, byte_size, model, dimension, started_at.isoformat()),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def update_ingestion_run(
+        self,
+        run_id: int,
+        *,
+        last_completed_line: int,
+        message_count: int,
+        window_count: int,
+        malformed_count: int,
+        estimated_tokens: int,
+        status: str = "running",
+        error_summary: str | None = None,
+        completed_at: datetime | None = None,
+    ) -> None:
+        self.connection.execute(
+            """UPDATE ingestion_runs SET last_completed_line = ?, message_count = ?,
+            window_count = ?, malformed_count = ?, estimated_tokens = ?,
+            estimated_cost_cny = ?, status = ?, error_summary = ?, completed_at = ?
+            WHERE run_id = ?""",
+            (
+                last_completed_line,
+                message_count,
+                window_count,
+                malformed_count,
+                estimated_tokens,
+                estimated_tokens * 0.5 / 1_000_000,
+                status,
+                error_summary,
+                _iso(completed_at),
+                run_id,
+            ),
+        )
+        self.connection.commit()
+
+    def latest_ingestion_run(self) -> dict[str, object] | None:
+        cursor = self.connection.execute(
+            """SELECT run_id, source_id, source_fingerprint, byte_size,
+            last_completed_line, message_count, window_count, malformed_count,
+            status, embedding_model, embedding_dimension, estimated_tokens,
+            estimated_cost_cny, error_summary, started_at, completed_at
+            FROM ingestion_runs ORDER BY run_id DESC LIMIT 1"""
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return dict(zip((item[0] for item in cursor.description), row, strict=True))
 
     def get_window_messages(self, window_id: str) -> list[Message]:
         ids = [

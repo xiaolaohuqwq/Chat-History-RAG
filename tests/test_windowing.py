@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from chat_rag.domain import Message
-from chat_rag.windowing import WINDOWING_VERSION, build_windows
+from chat_rag.windowing import WINDOWING_VERSION, build_windows, iter_windows
 
 
 def message(line: int, minute: int, text: str = "测试消息") -> Message:
@@ -39,3 +39,38 @@ def test_windowing_uses_overlap_and_respects_hard_maximum() -> None:
     assert len(windows) > 1
     assert all(window.estimated_tokens <= 75 for window in windows)
     assert windows[0].message_ids[-1] == windows[1].message_ids[0]
+
+
+def test_window_generator_emits_before_consuming_the_whole_source() -> None:
+    consumed = 0
+
+    def source():
+        nonlocal consumed
+        for line in range(1, 101):
+            consumed += 1
+            yield message(line, line % 60, "中" * 20)
+
+    windows = iter_windows(source(), target_tokens=50, max_tokens=70, overlap_messages=0)
+    assert next(windows).estimated_tokens <= 70
+    assert consumed < 100
+
+
+def test_exceptionally_long_message_is_split_below_hard_limit_without_data_loss() -> None:
+    original = "中" * 500
+    windows = build_windows(
+        [message(1, 0, original)], target_tokens=50, max_tokens=80, overlap_messages=0
+    )
+    assert len(windows) > 1
+    assert all(window.estimated_tokens <= 80 for window in windows)
+    assert sum(window.text.count("中") for window in windows) == len(original)
+    assert all(window.message_ids == ("m_1",) for window in windows)
+
+
+def test_overlap_does_not_create_a_trailing_window_with_no_new_message() -> None:
+    windows = build_windows(
+        [message(1, 0, "中" * 40), message(2, 1, "中" * 40)],
+        target_tokens=45,
+        max_tokens=80,
+        overlap_messages=1,
+    )
+    assert len({window.window_id for window in windows}) == len(windows)
