@@ -112,3 +112,32 @@ def test_client_streams_answer_deltas_and_returns_complete_text() -> None:
 
     assert answer == "第一段第二段"
     assert deltas == ["第一段", "第二段"]
+
+
+def test_stream_ignores_final_usage_chunk_without_choices() -> None:
+    usage_chunk = (
+        'data: {"id":"completion","object":"chat.completion.chunk","created":1,'
+        '"model":"test-model","choices":[],"usage":{"total_tokens":12}}\n\n'
+    )
+    body = streaming_payload("完整回答").replace(
+        "data: [DONE]\n\n", usage_chunk + "data: [DONE]\n\n"
+    )
+    client = OpenAICompatibleClient(
+        "secret",
+        "https://relay.example/v1",
+        "model",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                text=body,
+                headers={"content-type": "text/event-stream"},
+            )
+        ),
+        max_attempts=1,
+    )
+    deltas: list[str] = []
+
+    answer = client.complete("system", "user", on_delta=deltas.append)
+
+    assert answer == "完整回答"
+    assert deltas == ["完整回答"]
