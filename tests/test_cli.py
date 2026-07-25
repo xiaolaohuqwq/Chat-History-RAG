@@ -74,3 +74,38 @@ def test_ask_reports_missing_configuration_without_traceback(tmp_path: Path, mon
     assert result.exit_code != 0
     assert "required" in result.output
     assert "Traceback" not in result.output
+
+
+def test_reset_cancellation_preserves_index_data(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    database = tmp_path / "app.db"
+    vectors = tmp_path / "vectors"
+    database.write_text("database", encoding="utf-8")
+    vectors.mkdir()
+
+    result = CliRunner().invoke(app, ["reset"], input="n\n")
+
+    assert result.exit_code == 0
+    assert database.exists()
+    assert vectors.exists()
+
+
+def test_reset_yes_deletes_only_generated_index_data(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    for name in ("app.db", "app.db-wal", "app.db-shm", "app.db-journal"):
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    vectors = tmp_path / "vectors"
+    vectors.mkdir()
+    (vectors / "table.lance").write_text("vector", encoding="utf-8")
+    unrelated = tmp_path / "keep.txt"
+    unrelated.write_text("keep", encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["reset", "--yes"])
+
+    assert result.exit_code == 0
+    assert not vectors.exists()
+    assert all(
+        not (tmp_path / name).exists()
+        for name in ("app.db", "app.db-wal", "app.db-shm", "app.db-journal")
+    )
+    assert unrelated.read_text(encoding="utf-8") == "keep"

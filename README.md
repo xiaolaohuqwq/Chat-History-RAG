@@ -91,6 +91,17 @@ data/app.db
 data/vectors/
 ```
 
+更换整套聊天数据前，先退出 TUI，再删除当前索引并导入新文件：
+
+```bash
+uv run chat-rag reset
+uv run chat-rag ingest new_messages.jsonl
+```
+
+`reset` 默认要求确认，只删除当前 `DATA_DIR` 下的 `app.db`、SQLite 辅助文件和
+`vectors/`，不会删除同目录中的其他文件。明确需要非交互执行时可使用
+`uv run chat-rag reset --yes`。
+
 ## 使用方法
 
 ### 终端界面
@@ -133,6 +144,9 @@ uv run chat-rag inspect MESSAGE_OR_WINDOW_ID
 
 # 查看索引元数据和统计信息
 uv run chat-rag stats
+
+# 删除当前本地消息和向量索引
+uv run chat-rag reset
 ```
 
 ### 检索评测

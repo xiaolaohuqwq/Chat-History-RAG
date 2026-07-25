@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 from typing import Annotated, NoReturn
@@ -227,6 +228,45 @@ def stats() -> None:
             typer.echo(f"estimated API spend: CNY {run['estimated_cost_cny']:.6f}")
     vectors = LanceVectorStore(data_dir / "vectors", settings.embedding_dimension)
     typer.echo(f"vectors: {vectors.count():,}")
+
+
+@app.command()
+def reset(
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Delete without interactive confirmation."),
+    ] = False,
+) -> None:
+    """Permanently delete the current local message and vector index."""
+    data_dir = Path(Settings().data_dir).expanduser().resolve()
+    if not yes and not typer.confirm(
+        f"Permanently delete indexed data from {data_dir}?", default=False
+    ):
+        typer.echo("Cancelled.")
+        return
+
+    database_paths = [
+        data_dir / "app.db",
+        data_dir / "app.db-wal",
+        data_dir / "app.db-shm",
+        data_dir / "app.db-journal",
+    ]
+    vectors_path = data_dir / "vectors"
+    existed = any(path.exists() or path.is_symlink() for path in [*database_paths, vectors_path])
+    try:
+        for path in database_paths:
+            path.unlink(missing_ok=True)
+        if vectors_path.is_symlink() or vectors_path.is_file():
+            vectors_path.unlink()
+        elif vectors_path.is_dir():
+            shutil.rmtree(vectors_path)
+    except OSError as error:
+        _fail(f"failed to reset indexed data: {error}")
+
+    if existed:
+        typer.echo(f"Deleted indexed data from {data_dir}")
+    else:
+        typer.echo(f"No indexed data found in {data_dir}")
 
 
 @app.command("eval")
