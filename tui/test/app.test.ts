@@ -120,6 +120,20 @@ describe("ChatApp", () => {
     await pending;
   });
 
+  it("hides pipe-separated citation labels from a streaming answer", async () => {
+    const tui = new TUI(new VirtualTerminal());
+    const backend = new DeferredBackend();
+    const app = new ChatApp(tui, backend, () => {});
+
+    const pending = app.submit("项目延期了吗？");
+    backend.emitAnswer("结论 [m_148d687d606705adeb17e3cc | e4]");
+    const rendered = app.render(80).join("\n");
+    expect(rendered).toContain("结论");
+    expect(rendered).not.toContain("m_148d687d606705adeb17e3cc");
+    backend.finish();
+    await pending;
+  });
+
   it("clears conversation and requests quit cleanly", async () => {
     let quit = false;
     const tui = new TUI(new VirtualTerminal());

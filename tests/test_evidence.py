@@ -24,3 +24,9 @@ def test_grouped_citations_are_extracted_and_hidden_from_display_text() -> None:
     answer = "结论 [e6, m_5c0dbc4b7af05f113ed9f1bd]，依据 [m2]。"
     assert cited_ids(answer) == {"e6", "m_5c0dbc4b7af05f113ed9f1bd", "m2"}
     assert invalid_citations(answer, {"m_5c0dbc4b7af05f113ed9f1bd", "m2"}) == set()
+
+
+def test_pipe_separated_citations_are_extracted() -> None:
+    answer = "结论 [m_148d687d606705adeb17e3cc | e4]"
+    assert cited_ids(answer) == {"m_148d687d606705adeb17e3cc", "e4"}
+    assert invalid_citations(answer, {"m_148d687d606705adeb17e3cc"}) == set()

@@ -167,6 +167,16 @@ def test_answer_hides_grouped_citation_labels_but_keeps_message_metadata(tmp_pat
     assert len(llm.calls) == 1
 
 
+def test_answer_hides_pipe_separated_citation_labels(tmp_path: Path) -> None:
+    llm = ScriptedLLM(["综合结论 [m1 | e4]"])
+    with SQLiteStore(tmp_path / "app.db") as store:
+        results = make_results(store, 1)
+        result = ChatRAGService(store, FakeRetriever(results), llm).ask("编号是什么？")
+
+    assert result.answer == "综合结论"
+    assert result.citations == ("m1",)
+
+
 def test_latest_question_applies_recency_bonus_only_when_requested(tmp_path: Path) -> None:
     llm = ScriptedLLM(["最新结论 [m2]"])
     with SQLiteStore(tmp_path / "app.db") as store:

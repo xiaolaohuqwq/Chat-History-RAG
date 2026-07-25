@@ -40,8 +40,8 @@ const stageLabels: Record<string, string> = {
   generation: "生成证据回答",
 };
 
-const citationLabelPattern = /\[[A-Za-z][A-Za-z0-9_-]*(?:\s*,\s*[A-Za-z][A-Za-z0-9_-]*)*\]/g;
-const partialCitationLabelPattern = /\[[A-Za-z][A-Za-z0-9_,\s-]*$/;
+const citationLabelPattern = /\[[A-Za-z][A-Za-z0-9_-]*(?:\s*[,|]\s*[A-Za-z][A-Za-z0-9_-]*)*\]/g;
+const partialCitationLabelPattern = /\[[A-Za-z][A-Za-z0-9_,|\s-]*$/;
 
 function hideCitationLabels(text: string): string {
   return text

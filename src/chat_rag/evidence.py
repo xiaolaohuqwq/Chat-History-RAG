@@ -24,7 +24,7 @@ def validate_card_sources(card: EvidenceCard, allowed_ids: set[str]) -> None:
 
 
 _CITATION_GROUP_PATTERN = re.compile(
-    r"\[([A-Za-z][A-Za-z0-9_-]*(?:\s*,\s*[A-Za-z][A-Za-z0-9_-]*)*)\]"
+    r"\[([A-Za-z][A-Za-z0-9_-]*(?:\s*[,|]\s*[A-Za-z][A-Za-z0-9_-]*)*)\]"
 )
 _CITATION_ID_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 _EVIDENCE_ID_PATTERN = re.compile(r"e\d+")
