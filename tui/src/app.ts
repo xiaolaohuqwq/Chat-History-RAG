@@ -74,7 +74,6 @@ export class ChatApp implements Component, Focusable {
   private streamText = "";
   private scrollOffset = 0;
   private citations: string[] = [];
-  private citationIndex = 0;
   private _focused = false;
 
   constructor(
@@ -134,9 +133,11 @@ export class ChatApp implements Component, Focusable {
     } else if (command === "stats") {
       await this.run("stats", {});
     } else if (command === "inspect") {
-      const id = argument || this.nextCitation();
-      if (!id) return this.addError("当前没有可检查的引用");
-      await this.inspect(id);
+      if (argument) {
+        await this.inspect(argument);
+      } else {
+        await this.inspectAll();
+      }
     } else {
       this.addError(`未知命令: /${command}`);
     }
@@ -244,21 +245,35 @@ export class ChatApp implements Component, Focusable {
   private async inspect(id: string): Promise<void> {
     try {
       const result = await this.backend.request("inspect", { id }) as Record<string, unknown>;
-      const detail = [result.id, result.sender, result.timestamp, result.text].filter((value) => typeof value === "string").join("\n");
-      let handle: ReturnType<TUI["showOverlay"]>;
-      const overlay = new CitationOverlay(detail, () => handle.hide());
-      handle = this.tui.showOverlay(overlay, { width: "80%", maxHeight: "70%", margin: 1 });
-      this.tui.requestRender();
+      this.showCitationOverlay(this.formatInspection(result));
     } catch (error) {
       this.addError(error instanceof Error ? error.message : "引用检查失败");
     }
   }
 
-  private nextCitation(): string {
-    if (this.citations.length === 0) return "";
-    const id = this.citations[this.citationIndex % this.citations.length] ?? "";
-    this.citationIndex += 1;
-    return id;
+  private async inspectAll(): Promise<void> {
+    if (this.citations.length === 0) return this.addError("当前没有可检查的引用");
+    try {
+      const results = await Promise.all(
+        this.citations.map((id) => this.backend.request("inspect", { id }) as Promise<Record<string, unknown>>),
+      );
+      this.showCitationOverlay(results.map((result) => this.formatInspection(result)).join("\n\n"));
+    } catch (error) {
+      this.addError(error instanceof Error ? error.message : "引用检查失败");
+    }
+  }
+
+  private formatInspection(result: Record<string, unknown>): string {
+    return [result.id, result.sender, result.timestamp, result.text]
+      .filter((value) => typeof value === "string")
+      .join("\n");
+  }
+
+  private showCitationOverlay(detail: string): void {
+    let handle: ReturnType<TUI["showOverlay"]>;
+    const overlay = new CitationOverlay(detail, () => handle.hide());
+    handle = this.tui.showOverlay(overlay, { width: "80%", maxHeight: "70%", margin: 1 });
+    this.tui.requestRender();
   }
 
   private historyForRequest(): Array<{ role: "user" | "assistant"; content: string }> {

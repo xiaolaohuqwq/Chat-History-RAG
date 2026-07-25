@@ -30,8 +30,11 @@ class FakeBackend implements Backend {
   async request(method: RpcMethod, params: Record<string, unknown>, onEvent?: (event: RpcEvent) => void): Promise<unknown> {
     this.calls.push({ method, params });
     onEvent?.({ version: 1, id: "x", type: "progress", payload: { stage: "retrieval" } });
-    if (method === "ask") return { answer: "中文回答 **重点** [m1]", citations: ["m1"] };
-    if (method === "inspect") return { kind: "message", id: "m1", sender: "甲", timestamp: "2026", text: "证据原文" };
+    if (method === "ask") return { answer: "中文回答 **重点** [m1, m2]", citations: ["m1", "m2"] };
+    if (method === "inspect") {
+      const id = String(params.id);
+      return { kind: "message", id, sender: id === "m1" ? "甲" : "乙", timestamp: "2026", text: `证据${id}` };
+    }
     if (method === "search") return { results: [] };
     return { messages: 1, windows: 1, vectors: 1 };
   }
@@ -71,6 +74,20 @@ describe("ChatApp", () => {
     expect(backend.calls.map((call) => call.method)).toEqual(["ask", "search", "stats", "inspect"]);
   });
 
+  it("loads every answer citation for inspect without an ID", async () => {
+    const tui = new TUI(new VirtualTerminal());
+    const backend = new FakeBackend();
+    const app = new ChatApp(tui, backend, () => {});
+
+    await app.submit("项目结论是什么？");
+    await app.submit("/inspect");
+
+    expect(backend.calls.filter((call) => call.method === "inspect").map((call) => call.params)).toEqual([
+      { id: "m1" },
+      { id: "m2" },
+    ]);
+  });
+
   it("sends recent user and assistant turns with follow-up questions", async () => {
     const tui = new TUI(new VirtualTerminal());
     const backend = new FakeBackend();
@@ -84,7 +101,7 @@ describe("ChatApp", () => {
       question: "那后来呢？",
       history: [
         { role: "user", content: "星河项目为什么延期？" },
-        { role: "assistant", content: "中文回答 **重点** [m1]" },
+        { role: "assistant", content: "中文回答 **重点** [m1, m2]" },
       ],
     });
   });
