@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     model: str = "deepseek-chat"
     llm_context_window: int = 200_000
     llm_max_input_tokens: int = 140_000
-    llm_max_output_tokens: int = 4_000
+    llm_max_output_tokens: int = 15_000
 
     window_target_tokens: int = 500
     window_max_tokens: int = 800
@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     embedding_concurrency: int = 4
     vector_top_k_per_query: int = 40
     lexical_top_k_per_query: int = 40
-    rerank_candidates: int = 40
-    final_evidence_blocks: int = 12
+    rerank_candidates: int = 100
+    final_evidence_blocks: int = 30
     data_dir: str = "data"
 
     @model_validator(mode="after")
