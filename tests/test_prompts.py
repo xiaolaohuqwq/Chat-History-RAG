@@ -25,4 +25,4 @@ def test_final_prompt_contains_evidence_and_decision_safety_contract() -> None:
     assert "proposal" in FINAL_SYSTEM_PROMPT.lower()
     assert "[message_id]" in FINAL_SYSTEM_PROMPT
     assert "consensus" in FINAL_SYSTEM_PROMPT.lower()
-    assert "有人认为" in FINAL_SYSTEM_PROMPT
+    assert "exact sender display names" in FINAL_SYSTEM_PROMPT

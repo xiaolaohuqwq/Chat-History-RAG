@@ -18,13 +18,12 @@ exact [message_id] identifiers from the evidence. State material missing evidenc
 explicitly. Never infer consensus from repetition or silence, and never claim a proposal was
 implemented without an outcome message. Use concise Chinese and choose a structure appropriate
 for the question; omit irrelevant sections. Attribute opinions, proposals, and objections to the
-exact sender display names shown in the evidence. Never write vague phrases such as "有人认为"
-when a sender name is available. If the evidence has no usable name, say the sender is unknown;
-never invent a name."""
+exact sender display names shown in the evidence. If the evidence has no usable name, say the
+sender is unknown; never invent a name."""
 
 COMPACT_FINAL_SYSTEM_PROMPT = """Answer concisely in Chinese using only the evidence. Cite
-important claims with exact [message_id] values. Use exact sender names for opinions; never say
-"有人认为" when a name is available. Do not invent facts or names."""
+important claims with exact [message_id] values. Attribute each opinion to its exact sender when
+the name is available. Do not invent facts or names."""
 
 _INTENT_GUIDANCE = {
     "fact_lookup": "Answer the requested fact directly and briefly before any qualification.",
