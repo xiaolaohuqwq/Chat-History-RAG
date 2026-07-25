@@ -16,7 +16,7 @@ from chat_rag.evidence import (
 from chat_rag.llm_client import LLMProvider
 from chat_rag.prompts import (
     CITATION_REPAIR_SYSTEM_PROMPT,
-    FINAL_SYSTEM_PROMPT,
+    COMPACT_FINAL_SYSTEM_PROMPT,
     MAP_SYSTEM_PROMPT,
     PLANNER_SYSTEM_PROMPT,
     RetrievalPlan,
@@ -386,7 +386,7 @@ class ChatRAGService:
     ) -> tuple[str, set[str]]:
         system_prompt = answer_system_prompt(intent)
         if estimate_tokens(system_prompt + question) + 40 >= self.max_input_tokens:
-            system_prompt = FINAL_SYSTEM_PROMPT
+            system_prompt = COMPACT_FINAL_SYSTEM_PROMPT
         card_payloads: list[str] = []
         card_ids: set[str] = set()
         for card in cards:

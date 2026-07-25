@@ -17,12 +17,22 @@ decisions, final decisions, and observed outcomes when relevant. Cite every impo
 exact [message_id] identifiers from the evidence. State material missing evidence and uncertainty
 explicitly. Never infer consensus from repetition or silence, and never claim a proposal was
 implemented without an outcome message. Use concise Chinese and choose a structure appropriate
-for the question; omit irrelevant sections."""
+for the question; omit irrelevant sections. Attribute opinions, proposals, and objections to the
+exact sender display names shown in the evidence. Never write vague phrases such as "有人认为"
+when a sender name is available. If the evidence has no usable name, say the sender is unknown;
+never invent a name."""
+
+COMPACT_FINAL_SYSTEM_PROMPT = """Answer concisely in Chinese using only the evidence. Cite
+important claims with exact [message_id] values. Use exact sender names for opinions; never say
+"有人认为" when a name is available. Do not invent facts or names."""
 
 _INTENT_GUIDANCE = {
     "fact_lookup": "Answer the requested fact directly and briefly before any qualification.",
     "timeline": "Organize the answer chronologically and separate events from later recollections.",
-    "opinion_summary": "Group views by position and do not infer consensus from message volume.",
+    "opinion_summary": (
+        "Group views by position, name every available speaker, and do not infer consensus from "
+        "message volume."
+    ),
     "cause_analysis": (
         "Separate stated causes, inferred contributing factors, and unsupported guesses."
     ),
@@ -33,7 +43,8 @@ _INTENT_GUIDANCE = {
 
 MAP_SYSTEM_PROMPT = """Summarize only the supplied evidence as one JSON EvidenceCard with
 topic, period, claims, proposals, decisions, outcomes, disagreements, source_ids, and uncertainty.
-Every source_ids value must be an exact message ID present in the input."""
+Preserve the exact sender display name in every claim, proposal, and disagreement when available.
+Every source_ids value must be an exact message ID present in the input. Never invent a name."""
 
 CITATION_REPAIR_SYSTEM_PROMPT = """Repair invalid citations in the answer using only the
 provided allowed message IDs and evidence. Do not add new factual claims. Return the full repaired
