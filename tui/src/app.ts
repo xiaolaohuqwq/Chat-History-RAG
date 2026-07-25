@@ -51,17 +51,44 @@ function hideCitationLabels(text: string): string {
 }
 
 class CitationOverlay implements Component {
-  constructor(private readonly text: string, private readonly close: () => void) {}
+  private scrollOffset = 0;
+
+  constructor(
+    private readonly text: string,
+    private readonly close: () => void,
+    private readonly maxLines: number,
+  ) {}
+
   render(width: number): string[] {
     const inner = Math.max(1, width - 4);
+    const body = wrapTextWithAnsi(this.text, inner);
+    const viewport = Math.max(1, this.maxLines - 2);
+    const maxOffset = Math.max(0, body.length - viewport);
+    this.scrollOffset = Math.min(this.scrollOffset, maxOffset);
+    const end = Math.min(body.length, this.scrollOffset + viewport);
+    const position = body.length > viewport
+      ? colors.dim(`↑/↓ 浏览 ${this.scrollOffset + 1}-${end}/${body.length}`)
+      : colors.dim("Esc 关闭");
     return [
       truncateToWidth(colors.bold("引用详情"), width),
-      ...wrapTextWithAnsi(this.text, inner).map((line) => truncateToWidth(`  ${line}`, width)),
-      truncateToWidth(colors.dim("Esc 关闭"), width),
+      ...body.slice(this.scrollOffset, end).map((line) => truncateToWidth(`  ${line}`, width)),
+      truncateToWidth(position, width),
     ];
   }
+
   handleInput(data: string): void {
-    if (matchesKey(data, Key.escape)) this.close();
+    const step = Math.max(1, this.maxLines - 2);
+    if (matchesKey(data, Key.escape)) {
+      this.close();
+    } else if (matchesKey(data, Key.up)) {
+      this.scrollOffset = Math.max(0, this.scrollOffset - 1);
+    } else if (matchesKey(data, Key.down)) {
+      this.scrollOffset += 1;
+    } else if (matchesKey(data, Key.pageUp)) {
+      this.scrollOffset = Math.max(0, this.scrollOffset - step);
+    } else if (matchesKey(data, Key.pageDown)) {
+      this.scrollOffset += step;
+    }
   }
   invalidate(): void {}
 }
@@ -271,7 +298,8 @@ export class ChatApp implements Component, Focusable {
 
   private showCitationOverlay(detail: string): void {
     let handle: ReturnType<TUI["showOverlay"]>;
-    const overlay = new CitationOverlay(detail, () => handle.hide());
+    const maxLines = Math.max(4, Math.floor(this.tui.terminal.rows * 0.7));
+    const overlay = new CitationOverlay(detail, () => handle.hide(), maxLines);
     handle = this.tui.showOverlay(overlay, { width: "80%", maxHeight: "70%", margin: 1 });
     this.tui.requestRender();
   }
