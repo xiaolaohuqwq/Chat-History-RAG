@@ -28,9 +28,12 @@ class ScriptedLLM:
         self.answers = answers
         self.calls: list[tuple[str, str]] = []
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str, on_delta=None) -> str:
         self.calls.append((system, user))
-        return self.answers.pop(0)
+        answer = self.answers.pop(0)
+        if on_delta is not None:
+            on_delta(answer)
+        return answer
 
 
 def make_results(store: SQLiteStore, count: int, text_size: int = 5) -> list[SearchResult]:
@@ -74,7 +77,7 @@ def test_narrow_question_uses_one_answer_call_and_validates_citation(tmp_path: P
         result = ChatRAGService(store, FakeRetriever(results), llm, max_input_tokens=500).ask(
             "ABC-123是什么？"
         )
-    assert result.answer == "结论 [m1]"
+    assert result.answer == "结论"
     assert result.citations == ("m1",)
     assert len(llm.calls) == 1
     assert estimate_tokens("\n".join(llm.calls[0])) <= 500
@@ -89,9 +92,26 @@ def test_broad_question_plans_multiple_retrieval_queries(tmp_path: Path) -> None
         result = ChatRAGService(store, retriever, llm, max_input_tokens=1000).ask(
             "为什么推迟，最后结果是什么？"
         )
-    assert result.answer == "综合结论 [m1]"
+    assert result.answer == "综合结论"
     assert len(retriever.queries) == 5
     assert llm.calls[0][0] == PLANNER_SYSTEM_PROMPT
+
+
+def test_only_final_answer_is_streamed_for_a_broad_question(tmp_path: Path) -> None:
+    plan = '{"queries":["支持意见","反对意见","原因风险","最终结果"]}'
+    llm = ScriptedLLM([plan, "综合结论 [m1]"])
+    deltas: list[str] = []
+    with SQLiteStore(tmp_path / "app.db") as store:
+        results = make_results(store, 1)
+        ChatRAGService(
+            store,
+            FakeRetriever(results),
+            llm,
+            max_input_tokens=1000,
+            answer_delta=deltas.append,
+        ).ask("为什么推迟，最后结果是什么？")
+
+    assert deltas == ["综合结论 [m1]"]
 
 
 def test_large_evidence_uses_map_reduce_with_bounded_calls(tmp_path: Path) -> None:
@@ -131,9 +151,20 @@ def test_invalid_citation_gets_one_bounded_repair_call(tmp_path: Path) -> None:
     with SQLiteStore(tmp_path / "app.db") as store:
         results = make_results(store, 1)
         result = ChatRAGService(store, FakeRetriever(results), llm).ask("编号是什么？")
-    assert result.answer == "修复引用 [m1]"
+    assert result.answer == "修复引用"
     assert llm.calls[-1][0] == CITATION_REPAIR_SYSTEM_PROMPT
     assert result.citation_warning is None
+
+
+def test_answer_hides_grouped_citation_labels_but_keeps_message_metadata(tmp_path: Path) -> None:
+    llm = ScriptedLLM(["综合结论 [e6, m1]"])
+    with SQLiteStore(tmp_path / "app.db") as store:
+        results = make_results(store, 1)
+        result = ChatRAGService(store, FakeRetriever(results), llm).ask("编号是什么？")
+
+    assert result.answer == "综合结论"
+    assert result.citations == ("m1",)
+    assert len(llm.calls) == 1
 
 
 def test_latest_question_applies_recency_bonus_only_when_requested(tmp_path: Path) -> None:

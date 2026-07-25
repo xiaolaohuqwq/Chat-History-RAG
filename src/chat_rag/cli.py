@@ -114,6 +114,7 @@ def search(
                     concurrency=settings.embedding_concurrency,
                 ),
                 reranker=None if no_rerank else DashScopeReranker(api_key, settings.rerank_model),
+                rerank_candidates=settings.rerank_candidates,
             )
             results = retriever.search(
                 query,
@@ -159,6 +160,7 @@ def ask(
                 reranker=None
                 if no_rerank
                 else DashScopeReranker(embedding_key, settings.rerank_model),
+                rerank_candidates=settings.rerank_candidates,
             )
             llm = OpenAICompatibleClient(
                 llm_key,
@@ -250,6 +252,7 @@ def evaluate_file(
                     concurrency=settings.embedding_concurrency,
                 ),
                 reranker=DashScopeReranker(embedding_key, settings.rerank_model),
+                rerank_candidates=settings.rerank_candidates,
             )
             report = evaluate(list(iter_eval_cases(eval_file)), retriever.search)
     except (ValueError, RuntimeError) as error:

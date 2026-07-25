@@ -40,6 +40,16 @@ const stageLabels: Record<string, string> = {
   generation: "生成证据回答",
 };
 
+const citationLabelPattern = /\[[A-Za-z][A-Za-z0-9_-]*(?:\s*,\s*[A-Za-z][A-Za-z0-9_-]*)*\]/g;
+const partialCitationLabelPattern = /\[[A-Za-z][A-Za-z0-9_,\s-]*$/;
+
+function hideCitationLabels(text: string): string {
+  return text
+    .replace(citationLabelPattern, "")
+    .replace(partialCitationLabelPattern, "")
+    .replace(/\s+([，。！？；：,.!?;:])/g, "$1");
+}
+
 class CitationOverlay implements Component {
   constructor(private readonly text: string, private readonly close: () => void) {}
   render(width: number): string[] {
@@ -137,12 +147,16 @@ export class ChatApp implements Component, Focusable {
       if (item.role === "assistant") {
         conversation.push(...new Markdown(item.text, 1, 0, markdownTheme).render(safeWidth));
       } else {
-        const prefix = item.role === "user" ? colors.cyan("你: ") : colors.red("提示: ");
+        const prefix = item.role === "user" ? colors.cyan("查询: ") : colors.red("提示: ");
         conversation.push(...wrapTextWithAnsi(prefix + item.text, safeWidth));
       }
       conversation.push("");
     }
-    if (this.streamText) conversation.push(...new Markdown(this.streamText, 1, 0, markdownTheme).render(safeWidth));
+    if (this.streamText) {
+      conversation.push(
+        ...new Markdown(hideCitationLabels(this.streamText), 1, 0, markdownTheme).render(safeWidth),
+      );
+    }
     const loaderLines = this.loader?.render(safeWidth) ?? [];
     const viewport = Math.max(3, this.tui.terminal.rows - editorLines.length - loaderLines.length - 2);
     const end = Math.max(0, conversation.length - this.scrollOffset);
@@ -171,6 +185,8 @@ export class ChatApp implements Component, Focusable {
   }
 
   private async run(method: "ask" | "search" | "stats", params: Record<string, unknown>): Promise<void> {
+    const showHardwareCursor = this.tui.getShowHardwareCursor();
+    this.tui.setShowHardwareCursor(false);
     this.loader = new CancellableLoader(this.tui, colors.cyan, colors.dim, "处理中");
     this.loader.start();
     this.editor.disableSubmit = true;
@@ -204,6 +220,7 @@ export class ChatApp implements Component, Focusable {
       this.loader.dispose();
       this.loader = undefined;
       this.editor.disableSubmit = false;
+      this.tui.setShowHardwareCursor(showHardwareCursor);
       this.tui.requestRender();
     }
   }
@@ -260,4 +277,3 @@ export class ChatApp implements Component, Focusable {
     this.tui.requestRender();
   }
 }
-

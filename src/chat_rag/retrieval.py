@@ -52,11 +52,13 @@ class HybridRetriever:
         vectors: VectorStore,
         embedder: EmbeddingProvider,
         reranker: Reranker | None = None,
+        rerank_candidates: int = 40,
     ) -> None:
         self.store = store
         self.vectors = vectors
         self.embedder = embedder
         self.reranker = reranker
+        self.rerank_candidates = rerank_candidates
         self.degraded_reason: str | None = None
         self.last_timing: RetrievalTiming | None = None
 
@@ -85,7 +87,7 @@ class HybridRetriever:
         if self.reranker is not None:
             candidates = [
                 (window_id, window.text)
-                for window_id in ordered_ids
+                for window_id in ordered_ids[: self.rerank_candidates]
                 if (window := self.store.get_window(window_id)) is not None
             ]
             try:

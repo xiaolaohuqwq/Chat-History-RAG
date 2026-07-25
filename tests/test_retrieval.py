@@ -42,6 +42,15 @@ class FailingReranker:
         raise RuntimeError("provider down")
 
 
+class CapturingReranker:
+    def __init__(self) -> None:
+        self.candidates: list[tuple[str, str]] = []
+
+    def rerank(self, query: str, candidates: list[tuple[str, str]]) -> list[tuple[str, float]]:
+        self.candidates = candidates
+        return [(window_id, 1.0) for window_id, _text in candidates]
+
+
 def stored_windows(store: SQLiteStore) -> list[str]:
     messages = [
         Message(
@@ -127,3 +136,20 @@ def test_reranker_failure_falls_back_to_fused_results(tmp_path: Path) -> None:
 
         assert results
         assert retriever.degraded_reason == "reranking unavailable"
+
+
+def test_reranker_candidate_count_is_bounded(tmp_path: Path) -> None:
+    with SQLiteStore(tmp_path / "app.db") as store:
+        ids = stored_windows(store)
+        reranker = CapturingReranker()
+        retriever = HybridRetriever(
+            store,
+            QueryVectors(ids),
+            QueryEmbedder(),
+            reranker=reranker,
+            rerank_candidates=1,
+        )
+
+        retriever.search("ABC-123")
+
+        assert len(reranker.candidates) == 1

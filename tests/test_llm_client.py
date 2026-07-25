@@ -20,6 +20,24 @@ def completion_payload(content: str) -> dict[str, object]:
     }
 
 
+def streaming_payload(*contents: str) -> str:
+    chunks = []
+    for content in contents:
+        chunks.append(
+            "data: "
+            + __import__("json").dumps(
+                {
+                    "id": "completion",
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "test-model",
+                    "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+                }
+            )
+        )
+    return "\n\n".join([*chunks, "data: [DONE]"]) + "\n\n"
+
+
 @pytest.mark.parametrize(
     ("base_url", "expected_url"),
     [
@@ -75,3 +93,22 @@ def test_client_retries_429_once_and_redacts_key_from_errors() -> None:
     with pytest.raises(LLMError) as error:
         denied.complete("system", "user")
     assert secret not in str(error.value)
+
+
+def test_client_streams_answer_deltas_and_returns_complete_text() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            text=streaming_payload("第一段", "第二段"),
+            headers={"content-type": "text/event-stream"},
+        )
+    )
+    client = OpenAICompatibleClient(
+        "secret", "https://relay.example/v1", "model", transport=transport, max_attempts=1
+    )
+    deltas: list[str] = []
+
+    answer = client.complete("system", "user", on_delta=deltas.append)
+
+    assert answer == "第一段第二段"
+    assert deltas == ["第一段", "第二段"]

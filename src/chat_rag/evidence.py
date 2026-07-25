@@ -23,12 +23,30 @@ def validate_card_sources(card: EvidenceCard, allowed_ids: set[str]) -> None:
         raise ValueError("evidence card cites message IDs outside its input batch")
 
 
-_CITATION_PATTERN = re.compile(r"\[([A-Za-z][A-Za-z0-9_-]*)\]")
+_CITATION_GROUP_PATTERN = re.compile(
+    r"\[([A-Za-z][A-Za-z0-9_-]*(?:\s*,\s*[A-Za-z][A-Za-z0-9_-]*)*)\]"
+)
+_CITATION_ID_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
+_EVIDENCE_ID_PATTERN = re.compile(r"e\d+")
 
 
 def cited_ids(answer: str) -> set[str]:
-    return set(_CITATION_PATTERN.findall(answer))
+    return {
+        item
+        for group in _CITATION_GROUP_PATTERN.findall(answer)
+        for item in _CITATION_ID_PATTERN.findall(group)
+    }
 
 
 def invalid_citations(answer: str, allowed_ids: set[str]) -> set[str]:
-    return cited_ids(answer) - allowed_ids
+    return {
+        item
+        for item in cited_ids(answer) - allowed_ids
+        if _EVIDENCE_ID_PATTERN.fullmatch(item) is None
+    }
+
+
+def strip_citation_labels(answer: str) -> str:
+    stripped = _CITATION_GROUP_PATTERN.sub("", answer)
+    stripped = re.sub(r"\s+([，。！？；：,.!?;:])", r"\1", stripped)
+    return stripped.strip()

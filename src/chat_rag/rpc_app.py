@@ -69,6 +69,7 @@ class RpcApplication:
                 LanceVectorStore(data_dir / "vectors", self.settings.embedding_dimension),
                 embedder,
                 reranker,
+                rerank_candidates=self.settings.rerank_candidates,
             )
             results = retriever.search(
                 query,
@@ -94,6 +95,11 @@ class RpcApplication:
                 raise InterruptedError
             emit("progress", {"stage": stage})
 
+        def answer_delta(text: str) -> None:
+            if cancelled.is_set():
+                raise InterruptedError
+            emit("answer_delta", {"text": text})
+
         with SQLiteStore(data_dir / "app.db") as store:
             retriever = HybridRetriever(
                 store,
@@ -105,6 +111,7 @@ class RpcApplication:
                     concurrency=self.settings.embedding_concurrency,
                 ),
                 None if no_rerank else DashScopeReranker(embedding_key, self.settings.rerank_model),
+                rerank_candidates=self.settings.rerank_candidates,
             )
             result = ChatRAGService(
                 store,
@@ -118,10 +125,10 @@ class RpcApplication:
                 max_input_tokens=self.settings.llm_max_input_tokens,
                 final_evidence_blocks=self.settings.final_evidence_blocks,
                 progress=progress,
+                answer_delta=answer_delta,
             ).ask(question)
         if cancelled.is_set():
             raise InterruptedError
-        emit("answer_delta", {"text": result.answer})
         return {
             "answer": result.answer,
             "citations": list(result.citations),

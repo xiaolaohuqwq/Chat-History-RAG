@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Callable
 from typing import Protocol
 
 import httpx
@@ -14,7 +15,9 @@ class LLMError(RuntimeError):
 
 
 class LLMProvider(Protocol):
-    def complete(self, system: str, user: str) -> str: ...
+    def complete(
+        self, system: str, user: str, on_delta: Callable[[str], None] | None = None
+    ) -> str: ...
 
 
 class OpenAICompatibleClient:
@@ -40,9 +43,33 @@ class OpenAICompatibleClient:
             http_client=httpx.Client(transport=transport, timeout=120),
         )
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(
+        self, system: str, user: str, on_delta: Callable[[str], None] | None = None
+    ) -> str:
         for attempt in range(1, self.max_attempts + 1):
+            emitted = False
             try:
+                if on_delta is not None:
+                    stream = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user},
+                        ],
+                        max_tokens=self.max_output_tokens,
+                        stream=True,
+                    )
+                    parts: list[str] = []
+                    for chunk in stream:
+                        content = chunk.choices[0].delta.content
+                        if content:
+                            parts.append(content)
+                            on_delta(content)
+                            emitted = True
+                    answer = "".join(parts)
+                    if not answer:
+                        raise LLMError("LLM returned an empty answer")
+                    return answer
                 completion = self.client.chat.completions.create(
                     model=self.model,
                     messages=[
@@ -60,13 +87,13 @@ class OpenAICompatibleClient:
                 if status in {401, 403}:
                     raise LLMError("LLM authentication or permission failed") from None
                 if status in {408, 409, 429} or status >= 500:
-                    if attempt < self.max_attempts:
+                    if attempt < self.max_attempts and not emitted:
                         self._backoff(attempt)
                         continue
                     raise LLMError(f"LLM remained unavailable (HTTP {status})") from None
                 raise LLMError(f"LLM request was rejected (HTTP {status})") from None
             except openai.APIConnectionError:
-                if attempt < self.max_attempts:
+                if attempt < self.max_attempts and not emitted:
                     self._backoff(attempt)
                     continue
                 raise LLMError("LLM connection failed") from None

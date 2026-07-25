@@ -100,6 +100,10 @@ Plain editor submissions use evidence-based `/ask`. Available commands are
 multiline input and positions the terminal cursor for Chinese IME use. Escape
 cancels active work, Ctrl+C exits, PageUp/PageDown scroll the conversation, and
 `/inspect` without an ID cycles through citations from the latest answer.
+Citation IDs are retained as answer metadata for inspection but hidden from the
+displayed answer text. Final answers stream into the conversation as they are
+generated; the input cursor is hidden while a request is active and restored
+when it finishes or is cancelled.
 
 The TUI starts one long-lived `uv run chat-rag serve --stdio` child process. The
 versioned newline-delimited JSON protocol reserves Python stdout for events and

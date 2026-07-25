@@ -6,7 +6,13 @@ from dataclasses import asdict, dataclass
 from typing import Protocol
 
 from chat_rag.context_builder import EvidenceBlock, build_evidence_blocks, pack_evidence
-from chat_rag.evidence import EvidenceCard, cited_ids, invalid_citations, validate_card_sources
+from chat_rag.evidence import (
+    EvidenceCard,
+    cited_ids,
+    invalid_citations,
+    strip_citation_labels,
+    validate_card_sources,
+)
 from chat_rag.llm_client import LLMProvider
 from chat_rag.prompts import (
     CITATION_REPAIR_SYSTEM_PROMPT,
@@ -71,6 +77,7 @@ class ChatRAGService:
         map_batch_tokens: int = 30_000,
         final_evidence_blocks: int = 30,
         progress: ProgressCallback | None = None,
+        answer_delta: Callable[[str], None] | None = None,
     ) -> None:
         self.store = store
         self.retriever = retriever
@@ -80,6 +87,7 @@ class ChatRAGService:
         self.map_batch_tokens = map_batch_tokens
         self.final_evidence_blocks = final_evidence_blocks
         self.progress = progress or (lambda _stage: None)
+        self.answer_delta = answer_delta
 
     def ask(self, question: str) -> AskResult:
         self.progress("retrieval")
@@ -129,9 +137,10 @@ class ChatRAGService:
             else:
                 answer = repaired
 
+        citations = tuple(sorted(cited_ids(answer) & allowed_ids))
         return AskResult(
-            answer=answer,
-            citations=tuple(sorted(cited_ids(answer) & allowed_ids)),
+            answer=strip_citation_labels(answer),
+            citations=citations,
             used_map_reduce=used_map_reduce,
             degraded_reason=self.retriever.degraded_reason,
             citation_warning=warning,
@@ -141,10 +150,12 @@ class ChatRAGService:
         lowered = question.lower()
         return any(marker in lowered for marker in _BROAD_MARKERS)
 
-    def _complete(self, system: str, user: str) -> str:
+    def _complete(
+        self, system: str, user: str, on_delta: Callable[[str], None] | None = None
+    ) -> str:
         if estimate_tokens(f"{system}\n{user}") > self.max_input_tokens:
             raise ValueError("LLM request would exceed LLM_MAX_INPUT_TOKENS")
-        return self.llm.complete(system, user)
+        return self.llm.complete(system, user, on_delta)
 
     def _select_diverse(
         self, results: list[SearchResult], limit: int, *, prefer_recent: bool = False
@@ -277,5 +288,5 @@ class ChatRAGService:
         remaining = self.max_input_tokens - estimate_tokens(FINAL_SYSTEM_PROMPT + fixed) - 5
         packed = pack_evidence(blocks, max_tokens=max(remaining, 1))
         user = fixed + packed.text
-        answer = self._complete(FINAL_SYSTEM_PROMPT, user)
+        answer = self._complete(FINAL_SYSTEM_PROMPT, user, self.answer_delta)
         return answer, card_ids | set(packed.message_ids)
