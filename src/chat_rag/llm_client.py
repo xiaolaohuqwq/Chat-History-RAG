@@ -48,6 +48,7 @@ class OpenAICompatibleClient:
     ) -> str:
         for attempt in range(1, self.max_attempts + 1):
             emitted = False
+            parts: list[str] = []
             try:
                 if on_delta is not None:
                     stream = self.client.chat.completions.create(
@@ -59,7 +60,6 @@ class OpenAICompatibleClient:
                         max_tokens=self.max_output_tokens,
                         stream=True,
                     )
-                    parts: list[str] = []
                     for chunk in stream:
                         if not chunk.choices:
                             continue
@@ -95,6 +95,8 @@ class OpenAICompatibleClient:
                     raise LLMError(f"LLM remained unavailable (HTTP {status})") from None
                 raise LLMError(f"LLM request was rejected (HTTP {status})") from None
             except openai.APIConnectionError:
+                if emitted:
+                    return "".join(parts)
                 if attempt < self.max_attempts and not emitted:
                     self._backoff(attempt)
                     continue

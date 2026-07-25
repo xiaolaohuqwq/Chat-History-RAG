@@ -36,6 +36,20 @@ class ScriptedLLM:
         return answer
 
 
+class FailedCitationRepairLLM:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete(self, system: str, user: str, on_delta=None) -> str:
+        self.calls += 1
+        if self.calls == 1:
+            answer = "已有回答 [m_fake]"
+            if on_delta is not None:
+                on_delta(answer)
+            return answer
+        raise RuntimeError("LLM connection failed")
+
+
 def make_results(store: SQLiteStore, count: int, text_size: int = 5) -> list[SearchResult]:
     messages = []
     for line in range(1, count + 1):
@@ -154,6 +168,17 @@ def test_invalid_citation_gets_one_bounded_repair_call(tmp_path: Path) -> None:
     assert result.answer == "修复引用"
     assert llm.calls[-1][0] == CITATION_REPAIR_SYSTEM_PROMPT
     assert result.citation_warning is None
+
+
+def test_failed_citation_repair_keeps_generated_answer_with_warning(tmp_path: Path) -> None:
+    llm = FailedCitationRepairLLM()
+    with SQLiteStore(tmp_path / "app.db") as store:
+        results = make_results(store, 1)
+        result = ChatRAGService(store, FakeRetriever(results), llm).ask("编号是什么？")
+
+    assert result.answer == "已有回答"
+    assert result.citations == ()
+    assert result.citation_warning == "citation repair unavailable"
 
 
 def test_answer_hides_grouped_citation_labels_but_keeps_message_metadata(tmp_path: Path) -> None:

@@ -130,12 +130,16 @@ class ChatRAGService:
                 f"Allowed IDs: {sorted(allowed_ids)}\n"
                 f"Invalid IDs: {sorted(invalid)}\nOriginal answer:\n{answer}"
             )
-            repaired = self._complete(CITATION_REPAIR_SYSTEM_PROMPT, repair_user)
-            remaining = invalid_citations(repaired, allowed_ids)
-            if remaining:
-                warning = f"citation validation failed for: {', '.join(sorted(remaining))}"
+            try:
+                repaired = self._complete(CITATION_REPAIR_SYSTEM_PROMPT, repair_user)
+            except RuntimeError:
+                warning = "citation repair unavailable"
             else:
-                answer = repaired
+                remaining = invalid_citations(repaired, allowed_ids)
+                if remaining:
+                    warning = f"citation validation failed for: {', '.join(sorted(remaining))}"
+                else:
+                    answer = repaired
 
         citations = tuple(sorted(cited_ids(answer) & allowed_ids))
         return AskResult(

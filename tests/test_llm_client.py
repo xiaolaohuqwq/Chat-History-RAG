@@ -1,4 +1,7 @@
+from types import SimpleNamespace
+
 import httpx
+import openai
 import pytest
 
 from chat_rag.llm_client import LLMError, OpenAICompatibleClient
@@ -134,6 +137,26 @@ def test_stream_ignores_final_usage_chunk_without_choices() -> None:
             )
         ),
         max_attempts=1,
+    )
+    deltas: list[str] = []
+
+    answer = client.complete("system", "user", on_delta=deltas.append)
+
+    assert answer == "完整回答"
+    assert deltas == ["完整回答"]
+
+
+def test_stream_keeps_emitted_text_when_connection_closes_without_done() -> None:
+    client = OpenAICompatibleClient("secret", "https://relay.example/v1", "model", max_attempts=1)
+
+    def interrupted_stream():
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="完整回答"))])
+        raise openai.APIConnectionError(request=httpx.Request("POST", "https://relay.example"))
+
+    client.client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=lambda **kwargs: interrupted_stream())
+        )
     )
     deltas: list[str] = []
 
