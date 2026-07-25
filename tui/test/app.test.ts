@@ -71,6 +71,24 @@ describe("ChatApp", () => {
     expect(backend.calls.map((call) => call.method)).toEqual(["ask", "search", "stats", "inspect"]);
   });
 
+  it("sends recent user and assistant turns with follow-up questions", async () => {
+    const tui = new TUI(new VirtualTerminal());
+    const backend = new FakeBackend();
+    const app = new ChatApp(tui, backend, () => {});
+
+    await app.submit("星河项目为什么延期？");
+    await app.submit("那后来呢？");
+
+    expect(backend.calls[0]?.params).toEqual({ question: "星河项目为什么延期？", history: [] });
+    expect(backend.calls[1]?.params).toEqual({
+      question: "那后来呢？",
+      history: [
+        { role: "user", content: "星河项目为什么延期？" },
+        { role: "assistant", content: "中文回答 **重点** [m1]" },
+      ],
+    });
+  });
+
   it("never renders a line wider than narrow terminal width", async () => {
     const tui = new TUI(new VirtualTerminal());
     const app = new ChatApp(tui, new FakeBackend(), () => {});

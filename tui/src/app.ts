@@ -125,8 +125,12 @@ export class ChatApp implements Component, Focusable {
     const argument = rest.join(" ").trim();
     if (command === "ask" || command === "search") {
       if (!argument) return this.addError(`/${command} 需要内容`);
+      const history = command === "ask" ? this.historyForRequest() : [];
       this.items.push({ role: "user", text: argument });
-      await this.run(command, command === "ask" ? { question: argument } : { query: argument });
+      await this.run(
+        command,
+        command === "ask" ? { question: argument, history } : { query: argument },
+      );
     } else if (command === "stats") {
       await this.run("stats", {});
     } else if (command === "inspect") {
@@ -255,6 +259,18 @@ export class ChatApp implements Component, Focusable {
     const id = this.citations[this.citationIndex % this.citations.length] ?? "";
     this.citationIndex += 1;
     return id;
+  }
+
+  private historyForRequest(): Array<{ role: "user" | "assistant"; content: string }> {
+    const history = this.items
+      .filter((item): item is ConversationItem & { role: "user" | "assistant" } =>
+        item.role === "user" || item.role === "assistant")
+      .slice(-6)
+      .map((item) => ({ role: item.role, content: item.text.slice(0, 4000) }));
+    while (history.reduce((total, item) => total + item.content.length, 0) > 12000) {
+      history.shift();
+    }
+    return history;
   }
 
   private formatSearchResults(value: unknown): string {

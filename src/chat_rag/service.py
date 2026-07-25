@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Protocol
 
@@ -19,6 +19,8 @@ from chat_rag.prompts import (
     FINAL_SYSTEM_PROMPT,
     MAP_SYSTEM_PROMPT,
     PLANNER_SYSTEM_PROMPT,
+    RetrievalPlan,
+    answer_system_prompt,
     parse_retrieval_plan,
 )
 from chat_rag.retrieval import SearchResult
@@ -89,10 +91,53 @@ class ChatRAGService:
         self.progress = progress or (lambda _stage: None)
         self.answer_delta = answer_delta
 
-    def ask(self, question: str) -> AskResult:
+    def ask(
+        self, question: str, *, history: Sequence[Mapping[str, str]] = ()
+    ) -> AskResult:
+        standalone_question = question
+        intent = "fact_lookup"
+        subqueries: list[tuple[str, str]] = []
+        rankings: list[tuple[str, list[SearchResult]]] = []
+        if history:
+            self.progress("planning")
+            try:
+                plan = self._plan_question(question, history)
+            except (RuntimeError, ValueError):
+                plan = None
+            if plan is not None:
+                standalone_question = plan.standalone_question
+                intent = plan.intent
+                subqueries = [(item.purpose, item.query) for item in plan.subqueries]
+        else:
+            self.progress("retrieval")
+            initial = self.retriever.search(question)
+            if not initial:
+                return AskResult(
+                    answer="未检索到可用于回答该问题的聊天记录。",
+                    citations=(),
+                    empty=True,
+                    degraded_reason=self.retriever.degraded_reason,
+                )
+            rankings.append(("direct", initial))
+            if self._is_broad(question):
+                self.progress("planning")
+                try:
+                    plan = self._plan_question(question, history)
+                except (RuntimeError, ValueError):
+                    plan = None
+                if plan is not None:
+                    standalone_question = plan.standalone_question
+                    intent = plan.intent
+                    subqueries = [(item.purpose, item.query) for item in plan.subqueries]
+
         self.progress("retrieval")
-        initial = self.retriever.search(question)
-        if not initial:
+        if not rankings or standalone_question != question:
+            rankings.append(("direct", self.retriever.search(standalone_question)))
+        for purpose, query in subqueries:
+            if query != standalone_question:
+                rankings.append((purpose, self.retriever.search(query)))
+        all_results, result_roles = self._fuse_rankings(rankings)
+        if not all_results:
             return AskResult(
                 answer="未检索到可用于回答该问题的聊天记录。",
                 citations=(),
@@ -100,18 +145,15 @@ class ChatRAGService:
                 degraded_reason=self.retriever.degraded_reason,
             )
 
-        all_results = initial
-        if self._is_broad(question):
-            self.progress("planning")
-            plan_raw = self._complete(PLANNER_SYSTEM_PROMPT, question)
-            queries = parse_retrieval_plan(plan_raw)
-            for query in queries:
-                all_results.extend(self.retriever.search(query))
         selected = self._select_diverse(
             all_results,
             self.final_evidence_blocks,
-            prefer_recent=any(marker in question.lower() for marker in _LATEST_MARKERS),
+            prefer_recent=any(
+                marker in standalone_question.lower() for marker in _LATEST_MARKERS
+            ),
+            result_roles=result_roles,
         )
+        evidence_roles = self._evidence_roles(selected, result_roles)
         blocks = build_evidence_blocks(self.store, selected)
         full = pack_evidence(blocks, max_tokens=max(self.max_input_tokens * 10, 1_000_000))
 
@@ -122,7 +164,9 @@ class ChatRAGService:
             cards = self._map_evidence(blocks)
 
         self.progress("generation")
-        answer, allowed_ids = self._final_answer(question, blocks, cards)
+        answer, allowed_ids = self._final_answer(
+            standalone_question, blocks, cards, intent, evidence_roles
+        )
         invalid = invalid_citations(answer, allowed_ids)
         warning = None
         if invalid:
@@ -154,6 +198,54 @@ class ChatRAGService:
         lowered = question.lower()
         return any(marker in lowered for marker in _BROAD_MARKERS)
 
+    def _planner_input(
+        self, question: str, history: Sequence[Mapping[str, str]]
+    ) -> str:
+        turns = [
+            {"role": turn.get("role", ""), "content": turn.get("content", "")}
+            for turn in history[-6:]
+        ]
+        return (
+            f"Conversation:\n{json.dumps(turns, ensure_ascii=False)}\n\n"
+            f"Current question:\n{question}"
+        )
+
+    def _plan_question(
+        self, question: str, history: Sequence[Mapping[str, str]]
+    ) -> RetrievalPlan:
+        raw = self._complete(PLANNER_SYSTEM_PROMPT, self._planner_input(question, history))
+        return parse_retrieval_plan(raw)
+
+    def _fuse_rankings(
+        self, rankings: list[tuple[str, list[SearchResult]]]
+    ) -> tuple[list[SearchResult], dict[str, set[str]]]:
+        results_by_id: dict[str, SearchResult] = {}
+        scores: dict[str, float] = {}
+        roles: dict[str, set[str]] = {}
+        for purpose, results in rankings:
+            weight = 2.0 if purpose == "direct" else 1.0
+            for rank, result in enumerate(results, start=1):
+                window_id = result.window.window_id
+                results_by_id.setdefault(window_id, result)
+                scores[window_id] = scores.get(window_id, 0.0) + weight / (60 + rank)
+                roles.setdefault(window_id, set()).add(purpose)
+        fused = [
+            SearchResult(result.window, result.messages, scores[window_id])
+            for window_id, result in results_by_id.items()
+        ]
+        return sorted(fused, key=lambda item: (-item.score, item.window.window_id)), roles
+
+    def _evidence_roles(
+        self, results: list[SearchResult], result_roles: Mapping[str, set[str]]
+    ) -> dict[str, list[str]]:
+        roles: dict[str, list[str]] = {}
+        for result in results:
+            message_ids = [message.message_id for message in result.messages]
+            for role in sorted(result_roles.get(result.window.window_id, {"direct"})):
+                bucket = roles.setdefault(role, [])
+                bucket.extend(message_id for message_id in message_ids if message_id not in bucket)
+        return roles
+
     def _complete(
         self, system: str, user: str, on_delta: Callable[[str], None] | None = None
     ) -> str:
@@ -162,7 +254,12 @@ class ChatRAGService:
         return self.llm.complete(system, user, on_delta)
 
     def _select_diverse(
-        self, results: list[SearchResult], limit: int, *, prefer_recent: bool = False
+        self,
+        results: list[SearchResult],
+        limit: int,
+        *,
+        prefer_recent: bool = False,
+        result_roles: Mapping[str, set[str]] | None = None,
     ) -> list[SearchResult]:
         unique: dict[str, SearchResult] = {}
         for result in results:
@@ -173,6 +270,7 @@ class ChatRAGService:
         selected: list[SearchResult] = []
         seen_senders: set[str] = set()
         seen_days: set[str] = set()
+        seen_roles: set[str] = set()
         newest_time = max(
             (
                 message.time_utc
@@ -200,6 +298,8 @@ class ChatRAGService:
                     default=0.0,
                 )
                 bonus = 0.01 * bool(senders - seen_senders) + 0.01 * bool(days - seen_days)
+                roles = (result_roles or {}).get(result.window.window_id, set())
+                bonus += 0.03 * bool(roles - seen_roles)
                 if prefer_recent and newest_time is not None:
                     candidate_time = max(
                         (
@@ -216,6 +316,7 @@ class ChatRAGService:
             remaining.remove(best)
             selected.append(best)
             seen_senders.update(message.uid for message in best.messages)
+            seen_roles.update((result_roles or {}).get(best.window.window_id, set()))
             seen_days.update(
                 message.time_utc.date().isoformat()
                 for message in best.messages
@@ -276,21 +377,40 @@ class ChatRAGService:
         )
 
     def _final_answer(
-        self, question: str, blocks: list[EvidenceBlock], cards: list[EvidenceCard]
+        self,
+        question: str,
+        blocks: list[EvidenceBlock],
+        cards: list[EvidenceCard],
+        intent: str,
+        evidence_roles: Mapping[str, list[str]],
     ) -> tuple[str, set[str]]:
+        system_prompt = answer_system_prompt(intent)
+        if estimate_tokens(system_prompt + question) + 40 >= self.max_input_tokens:
+            system_prompt = FINAL_SYSTEM_PROMPT
         card_payloads: list[str] = []
         card_ids: set[str] = set()
         for card in cards:
             candidate = json.dumps(asdict(card), ensure_ascii=False)
             prefix = "Evidence cards:\n" + "\n".join([*card_payloads, candidate])
-            if estimate_tokens(FINAL_SYSTEM_PROMPT + question + prefix) >= self.max_input_tokens:
+            if estimate_tokens(system_prompt + question + prefix) >= self.max_input_tokens:
                 break
             card_payloads.append(candidate)
             card_ids.update(card.source_ids)
         cards_text = "\n".join(card_payloads)
-        fixed = f"Question:\n{question}\n\nEvidence cards:\n{cards_text}\n\nRaw evidence:\n"
-        remaining = self.max_input_tokens - estimate_tokens(FINAL_SYSTEM_PROMPT + fixed) - 5
+        role_text = json.dumps(evidence_roles, ensure_ascii=False, sort_keys=True)
+        role_section = (
+            "Evidence roles:\n"
+            f"{role_text}\nRoles are retrieval goals, not established facts.\n\n"
+        )
+        base_fixed = (
+            f"Question:\n{question}\n\nIntent:\n{intent}\n\n"
+            f"Evidence cards:\n{cards_text}\n\nRaw evidence:\n"
+        )
+        fixed = base_fixed
+        if estimate_tokens(system_prompt + role_section + base_fixed) + 20 < self.max_input_tokens:
+            fixed = base_fixed.replace("Evidence cards:\n", role_section + "Evidence cards:\n")
+        remaining = self.max_input_tokens - estimate_tokens(system_prompt + fixed) - 5
         packed = pack_evidence(blocks, max_tokens=max(remaining, 1))
         user = fixed + packed.text
-        answer = self._complete(FINAL_SYSTEM_PROMPT, user, self.answer_delta)
+        answer = self._complete(system_prompt, user, self.answer_delta)
         return answer, card_ids | set(packed.message_ids)

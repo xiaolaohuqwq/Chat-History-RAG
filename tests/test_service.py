@@ -76,6 +76,21 @@ def make_results(store: SQLiteStore, count: int, text_size: int = 5) -> list[Sea
     ]
 
 
+def structured_plan(question: str = "项目为什么推迟，最后结果是什么？") -> str:
+    return json.dumps(
+        {
+            "standalone_question": question,
+            "intent": "decision_history",
+            "subqueries": [
+                {"purpose": "cause", "query": "推迟原因"},
+                {"purpose": "objection", "query": "反对意见"},
+                {"purpose": "outcome", "query": "最终结果"},
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
 def test_empty_retrieval_skips_every_llm_call(tmp_path: Path) -> None:
     llm = ScriptedLLM([])
     with SQLiteStore(tmp_path / "app.db") as store:
@@ -98,7 +113,7 @@ def test_narrow_question_uses_one_answer_call_and_validates_citation(tmp_path: P
 
 
 def test_broad_question_plans_multiple_retrieval_queries(tmp_path: Path) -> None:
-    plan = '{"queries":["支持意见","反对意见","原因风险","最终结果"]}'
+    plan = structured_plan()
     llm = ScriptedLLM([plan, "综合结论 [m1]"])
     with SQLiteStore(tmp_path / "app.db") as store:
         results = make_results(store, 1)
@@ -107,12 +122,48 @@ def test_broad_question_plans_multiple_retrieval_queries(tmp_path: Path) -> None
             "为什么推迟，最后结果是什么？"
         )
     assert result.answer == "综合结论"
-    assert len(retriever.queries) == 5
+    assert retriever.queries == [
+        "为什么推迟，最后结果是什么？",
+        "项目为什么推迟，最后结果是什么？",
+        "推迟原因",
+        "反对意见",
+        "最终结果",
+    ]
     assert llm.calls[0][0] == PLANNER_SYSTEM_PROMPT
+    assert "Evidence roles:" in llm.calls[-1][1]
+    assert "outcome" in llm.calls[-1][1]
+
+
+def test_follow_up_question_is_rewritten_with_conversation_history(tmp_path: Path) -> None:
+    plan = json.dumps(
+        {
+            "standalone_question": "星河项目后来上线了吗？",
+            "intent": "decision_history",
+            "subqueries": [
+                {"purpose": "proposal", "query": "星河项目 上线计划"},
+                {"purpose": "decision", "query": "星河项目 上线决定"},
+                {"purpose": "outcome", "query": "星河项目 上线结果"},
+            ],
+        },
+        ensure_ascii=False,
+    )
+    llm = ScriptedLLM([plan, "已经上线 [m1]"])
+    history = (
+        {"role": "user", "content": "星河项目为什么延期？"},
+        {"role": "assistant", "content": "因为发布风险。"},
+    )
+    with SQLiteStore(tmp_path / "app.db") as store:
+        results = make_results(store, 1)
+        retriever = FakeRetriever(results)
+        ChatRAGService(store, retriever, llm).ask("那后来呢？", history=history)
+
+    assert retriever.queries[0] == "星河项目后来上线了吗？"
+    assert "星河项目为什么延期" in llm.calls[0][1]
+    assert "Question:\n星河项目后来上线了吗？" in llm.calls[-1][1]
 
 
 def test_only_final_answer_is_streamed_for_a_broad_question(tmp_path: Path) -> None:
-    plan = '{"queries":["支持意见","反对意见","原因风险","最终结果"]}'
+    plan = structured_plan()
     llm = ScriptedLLM([plan, "综合结论 [m1]"])
     deltas: list[str] = []
     with SQLiteStore(tmp_path / "app.db") as store:
@@ -129,7 +180,7 @@ def test_only_final_answer_is_streamed_for_a_broad_question(tmp_path: Path) -> N
 
 
 def test_large_evidence_uses_map_reduce_with_bounded_calls(tmp_path: Path) -> None:
-    plan = '{"queries":["支持意见","反对意见","原因风险","最终结果"]}'
+    plan = structured_plan()
     card = json.dumps(
         {
             "topic": "上线",

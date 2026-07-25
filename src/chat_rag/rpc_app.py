@@ -41,6 +41,7 @@ class RpcApplication:
         if request.method == "ask":
             return self._ask(
                 self._string_param(request, "question"),
+                self._history_param(request),
                 self._bool_param(request, "no_rerank", default=False),
                 cancelled,
                 emit,
@@ -82,6 +83,7 @@ class RpcApplication:
     def _ask(
         self,
         question: str,
+        history: tuple[dict[str, str], ...],
         no_rerank: bool,
         cancelled: Event,
         emit: EventEmitter,
@@ -126,7 +128,7 @@ class RpcApplication:
                 final_evidence_blocks=self.settings.final_evidence_blocks,
                 progress=progress,
                 answer_delta=answer_delta,
-            ).ask(question)
+            ).ask(question, history=history)
         if cancelled.is_set():
             raise InterruptedError
         return {
@@ -225,3 +227,27 @@ class RpcApplication:
         if not isinstance(value, bool):
             raise ValueError(f"parameter {name} must be a boolean")
         return value
+
+    def _history_param(self, request: RpcRequest) -> tuple[dict[str, str], ...]:
+        value = request.params.get("history", [])
+        if not isinstance(value, list) or len(value) > 6:
+            raise ValueError("parameter history must contain at most six turns")
+        turns: list[dict[str, str]] = []
+        total_length = 0
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError("parameter history contains an invalid turn")
+            role = item.get("role")
+            content = item.get("content")
+            if (
+                role not in {"user", "assistant"}
+                or not isinstance(content, str)
+                or not content.strip()
+                or len(content) > 4_000
+            ):
+                raise ValueError("parameter history contains an invalid turn")
+            total_length += len(content)
+            turns.append({"role": role, "content": content})
+        if total_length > 12_000:
+            raise ValueError("parameter history exceeds the size limit")
+        return tuple(turns)
