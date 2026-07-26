@@ -34,4 +34,12 @@ describe("BackendClient", () => {
     await expect(request).rejects.toThrow("cancelled");
     await expect(client.request("stats", {})).resolves.toMatchObject({ messages: 3 });
   });
+
+  it("includes backend diagnostics when the process exits", async () => {
+    client = new BackendClient(process.execPath, [path.join(here, "fake-backend.mjs")]);
+
+    await expect(client.request("ask", { question: "crash" })).rejects.toThrow(
+      "synthetic backend failure",
+    );
+  });
 });

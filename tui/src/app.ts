@@ -23,7 +23,6 @@ export interface Backend {
     onEvent?: (event: RpcEvent) => void,
     signal?: AbortSignal,
   ): Promise<unknown>;
-  cancel(): void;
   shutdown(): Promise<void>;
 }
 

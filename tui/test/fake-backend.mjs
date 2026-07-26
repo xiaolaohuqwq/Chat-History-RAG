@@ -13,6 +13,10 @@ lines.on("line", (line) => {
   if (request.method === "cancel") {
     send("result", { cancelled: true });
   } else if (request.method === "ask") {
+    if (request.params.question === "crash") {
+      process.stderr.write("synthetic backend failure\n");
+      process.exit(1);
+    }
     send("progress", { stage: "retrieval" });
     if (request.params.question === "wait") return;
     send("answer_delta", { text: "测试答案 [m1]" });

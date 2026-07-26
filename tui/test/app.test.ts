@@ -38,7 +38,6 @@ class FakeBackend implements Backend {
     if (method === "search") return { results: [] };
     return { messages: 1, windows: 1, vectors: 1 };
   }
-  cancel(): void {}
   async shutdown(): Promise<void> {}
 }
 
@@ -55,7 +54,6 @@ class DeferredBackend implements Backend {
   finish(): void {
     this.resolveRequest?.({ answer: "完成", citations: [] });
   }
-  cancel(): void {}
   async shutdown(): Promise<void> {}
 }
 

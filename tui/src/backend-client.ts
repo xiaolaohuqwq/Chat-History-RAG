@@ -31,14 +31,15 @@ export class BackendClient {
     });
     this.child.on("exit", () => {
       this.closed = true;
-      for (const pending of this.pending.values()) {
-        pending.reject(new Error("Python backend exited"));
-      }
-      this.pending.clear();
+      const diagnostics = this.diagnostics.trim();
+      const message = diagnostics
+        ? `Python backend exited:\n${diagnostics}`
+        : "Python backend exited";
+      this.rejectPending(new Error(message));
     });
     this.child.on("error", (error) => {
-      for (const pending of this.pending.values()) pending.reject(error);
-      this.pending.clear();
+      this.closed = true;
+      this.rejectPending(error);
     });
   }
 
@@ -69,15 +70,10 @@ export class BackendClient {
     });
   }
 
-  cancel(): void {
-    for (const id of this.pending.keys()) this.sendCancel(id);
-  }
-
   async shutdown(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    for (const pending of this.pending.values()) pending.reject(new Error("backend shutdown"));
-    this.pending.clear();
+    this.rejectPending(new Error("backend shutdown"));
     this.child.stdin.end();
     this.child.kill("SIGTERM");
     await Promise.race([
@@ -96,6 +92,14 @@ export class BackendClient {
       params: { request_id: requestId },
     };
     this.child.stdin.write(JSON.stringify(cancel) + "\n");
+  }
+
+  private rejectPending(error: Error): void {
+    for (const pending of this.pending.values()) {
+      pending.removeAbortListener?.();
+      pending.reject(error);
+    }
+    this.pending.clear();
   }
 
   private handleLine(line: string): void {
@@ -120,4 +124,3 @@ export class BackendClient {
     }
   }
 }
-
