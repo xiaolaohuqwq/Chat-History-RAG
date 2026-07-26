@@ -91,9 +91,7 @@ class ChatRAGService:
         self.progress = progress or (lambda _stage: None)
         self.answer_delta = answer_delta
 
-    def ask(
-        self, question: str, *, history: Sequence[Mapping[str, str]] = ()
-    ) -> AskResult:
+    def ask(self, question: str, *, history: Sequence[Mapping[str, str]] = ()) -> AskResult:
         standalone_question = question
         intent = "fact_lookup"
         subqueries: list[tuple[str, str]] = []
@@ -148,9 +146,7 @@ class ChatRAGService:
         selected = self._select_diverse(
             all_results,
             self.final_evidence_blocks,
-            prefer_recent=any(
-                marker in standalone_question.lower() for marker in _LATEST_MARKERS
-            ),
+            prefer_recent=any(marker in standalone_question.lower() for marker in _LATEST_MARKERS),
             result_roles=result_roles,
         )
         evidence_roles = self._evidence_roles(selected, result_roles)
@@ -198,9 +194,7 @@ class ChatRAGService:
         lowered = question.lower()
         return any(marker in lowered for marker in _BROAD_MARKERS)
 
-    def _planner_input(
-        self, question: str, history: Sequence[Mapping[str, str]]
-    ) -> str:
+    def _planner_input(self, question: str, history: Sequence[Mapping[str, str]]) -> str:
         turns = [
             {"role": turn.get("role", ""), "content": turn.get("content", "")}
             for turn in history[-6:]
@@ -210,9 +204,7 @@ class ChatRAGService:
             f"Current question:\n{question}"
         )
 
-    def _plan_question(
-        self, question: str, history: Sequence[Mapping[str, str]]
-    ) -> RetrievalPlan:
+    def _plan_question(self, question: str, history: Sequence[Mapping[str, str]]) -> RetrievalPlan:
         raw = self._complete(PLANNER_SYSTEM_PROMPT, self._planner_input(question, history))
         return parse_retrieval_plan(raw)
 
@@ -399,8 +391,7 @@ class ChatRAGService:
         cards_text = "\n".join(card_payloads)
         role_text = json.dumps(evidence_roles, ensure_ascii=False, sort_keys=True)
         role_section = (
-            "Evidence roles:\n"
-            f"{role_text}\nRoles are retrieval goals, not established facts.\n\n"
+            f"Evidence roles:\n{role_text}\nRoles are retrieval goals, not established facts.\n\n"
         )
         base_fixed = (
             f"Question:\n{question}\n\nIntent:\n{intent}\n\n"

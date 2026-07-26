@@ -5,13 +5,10 @@ description = "Local chat-history retrieval with cloud inference"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "dashscope>=1.24.0",
   "httpx>=0.28.0",
   "lancedb>=0.24.0",
   "openai>=1.93.0",
-  "pyarrow>=20.0.0",
   "pydantic-settings>=2.10.0",
-  "tenacity>=9.1.0",
   "typer>=0.16.0",
 ]
 
@@ -40,4 +37,3 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-

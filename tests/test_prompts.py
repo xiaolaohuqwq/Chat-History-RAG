@@ -20,6 +20,8 @@ def test_retrieval_plan_preserves_intent_and_evidence_purposes() -> None:
         ("objection", "项目 反对 风险"),
         ("outcome", "项目 最终 上线 结果"),
     ]
+
+
 def test_final_prompt_contains_evidence_and_decision_safety_contract() -> None:
     assert "only" in FINAL_SYSTEM_PROMPT.lower()
     assert "proposal" in FINAL_SYSTEM_PROMPT.lower()
