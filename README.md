@@ -9,6 +9,7 @@ Chat History RAG 用于从大量消息记录（比如 QQ）检索相关信息，
 - uv
 - Node.js 22.19
 - npm
+
 若使用 QQ 导出数据：
 - jq
 - [qq-chat-exporter](https://github.com/shuakami/qq-chat-exporter)
